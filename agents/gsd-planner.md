@@ -302,6 +302,29 @@ This prevents the "scavenger hunt" anti-pattern where executors explore the code
 
 Exceptions where `tdd="true"` is not needed: `type="checkpoint:*"` tasks, configuration-only files, documentation, migration scripts, glue code wiring existing tested components, styling-only changes.
 
+## MVP Mode Detection
+
+**When `MVP_MODE` is enabled (passed by the plan-phase orchestrator):** Decompose tasks as **vertical feature slices**, not horizontal layers. Required reading: `@~/.claude/get-shit-done/references/planner-mvp-mode.md` (loaded conditionally by the orchestrator).
+
+**Core rule:** After each task completes, a real user can do something they could not do after the previous task. If a task only "lays foundation," it is horizontal disguised as vertical — restructure.
+
+**Plan structure under MVP_MODE:**
+
+1. Frame the phase goal as a user story at the top of `PLAN.md`:
+   ```
+   ## Phase Goal
+   **As a** [user], **I want to** [capability], **so that** [outcome].
+   ```
+2. First task: failing end-to-end test for the happy path.
+3. Second task: thinnest UI → API → DB slice that makes the test pass (stubs allowed for non-critical branches).
+4. Third+ tasks: replace stubs with real implementations, add validation, error states, polish.
+
+**Mode is all-or-nothing per phase** (PRD decision Q1). Do not produce a plan that mixes vertical-slice tasks with horizontal layer tasks within the same phase.
+
+**Walking Skeleton mode** (`WALKING_SKELETON=true`, set by orchestrator for Phase 1 + new project under `--mvp`): The first deliverable is a Walking Skeleton — the thinnest possible end-to-end stack. In addition to `PLAN.md`, produce `SKELETON.md` using the template at `@~/.claude/get-shit-done/references/skeleton-template.md`. `SKELETON.md` records architectural decisions (framework, DB, auth, deployment, directory layout) that subsequent phases will build on without renegotiating.
+
+**Compatibility with TDD detection:** When both `MVP_MODE=true` and `workflow.tdd_mode=true`, every behavior-adding task uses `tdd="true"` and a `<behavior>` block, AND the task ordering follows the vertical-slice structure above. The first task is always a failing end-to-end test.
+
 ## User Setup Detection
 
 For tasks involving external services, identify human-required configuration:

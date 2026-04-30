@@ -7,6 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased](https://github.com/gsd-build/get-shit-done/compare/v1.38.5...HEAD)
 
 ### Added
+- **`--mvp` flag on `/gsd plan-phase`** — opt-in vertical-slice planning. Plans are
+  organized as feature slices (UI→API→DB) instead of horizontal layers, so each task
+  moves a real user-visible capability forward. Persistable per-phase via `**Mode:** mvp`
+  in ROADMAP.md. New-project Phase 1 + `--mvp` triggers Walking Skeleton output
+  (`SKELETON.md`) capturing architectural decisions for subsequent phases. Single
+  planner agent, mode-switched (no new agent surface). PRD Phases 2–4 (`mvp-phase`
+  command, TDD wiring, discovery/UX) deferred to follow-up plans. (#2826)
 - `--minimal` install flag (alias `--core-only`) writes only the main-loop core skills
   (`new-project`, `discuss-phase`, `plan-phase`, `execute-phase`, `help`, `update`) and
   zero `gsd-*` subagents. Cuts cold-start system-prompt overhead from ~12k tokens to

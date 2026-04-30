@@ -38,6 +38,7 @@ AGENT_SKILLS_PLANNER=$(gsd-sdk query agent-skills gsd-planner)
 AGENT_SKILLS_CHECKER=$(gsd-sdk query agent-skills gsd-plan-checker)
 CONTEXT_WINDOW=$(gsd-sdk query config-get context_window 2>/dev/null || echo "200000")
 TDD_MODE=$(gsd-sdk query config-get workflow.tdd_mode 2>/dev/null || echo "false")
+MVP_MODE_CFG=$(gsd-sdk query config-get workflow.mvp_mode 2>/dev/null || echo "false")
 ```
 
 When `TDD_MODE` is `true`, the planner agent is instructed to apply `type: tdd` to eligible tasks using heuristics from `references/tdd.md`. The planner's `<required_reading>` is extended to include `@~/.claude/get-shit-done/references/tdd.md` so gate enforcement rules are available during planning.
@@ -54,9 +55,36 @@ Parse JSON for: `researcher_model`, `planner_model`, `checker_model`, `research_
 
 ## 2. Parse and Normalize Arguments
 
-Extract from $ARGUMENTS: phase number (integer or decimal like `2.1`), flags (`--research`, `--skip-research`, `--gaps`, `--skip-verify`, `--skip-ui`, `--prd <filepath>`, `--reviews`, `--text`, `--bounce`, `--skip-bounce`, `--chunked`).
+Extract from $ARGUMENTS: phase number (integer or decimal like `2.1`), flags (`--research`, `--skip-research`, `--gaps`, `--skip-verify`, `--skip-ui`, `--prd <filepath>`, `--reviews`, `--text`, `--bounce`, `--skip-bounce`, `--chunked`, `--mvp`).
 
 Set `TEXT_MODE=true` if `--text` is present in $ARGUMENTS OR `text_mode` from init JSON is `true`. When `TEXT_MODE` is active, replace every `AskUserQuestion` call with a plain-text numbered list and ask the user to type their choice number. This is required for Claude Code remote sessions (`/rc` mode) where TUI menus don't work through the Claude App.
+
+**MVP_MODE resolution.** Resolve `MVP_MODE` once and reuse for the rest of the workflow. Order (first hit wins):
+
+1. **CLI flag.** If `$ARGUMENTS` contains `--mvp`, set `MVP_MODE=true`.
+2. **Roadmap phase mode.** Otherwise, query the phase's mode field:
+   ```bash
+   PHASE_MODE=$(gsd-sdk query roadmap.get-phase "${PHASE}" --pick mode)
+   if [ "$PHASE_MODE" = "mvp" ]; then MVP_MODE=true; fi
+   ```
+3. **Config default.** Otherwise, `MVP_MODE="$MVP_MODE_CFG"` (resolved in Step 1).
+4. **Fallback.** `MVP_MODE=false`.
+
+The mode is **all-or-nothing per phase** (per PRD decision Q1). Do not allow `--mvp` to apply selectively to a subset of tasks within a phase.
+
+**Walking Skeleton gate.** When `MVP_MODE=true` AND `phase_number == "01"` AND there are zero prior phase summaries (new project), the planner runs in **Walking Skeleton mode** (per PRD decision Q2 — new projects only). Detect with:
+
+```bash
+WALKING_SKELETON=false
+if [ "$MVP_MODE" = "true" ] && [ "$padded_phase" = "01" ]; then
+  PRIOR_SUMMARIES=$(gsd-sdk query phases.list --pick summaries_total 2>/dev/null || echo "0")
+  if [ "$PRIOR_SUMMARIES" = "0" ]; then WALKING_SKELETON=true; fi
+fi
+```
+
+When `WALKING_SKELETON=true`:
+- Planner is instructed to produce `SKELETON.md` in the phase directory alongside `PLAN.md`. The template lives at `@~/.claude/get-shit-done/references/skeleton-template.md`.
+- The plan must scaffold project + routing + one real DB read/write + one real UI interaction + dev deployment — the thinnest possible end-to-end working slice.
 
 Extract `--prd <filepath>` from $ARGUMENTS. If present, set PRD_FILE to the filepath.
 
@@ -755,6 +783,15 @@ ${TDD_MODE === 'true' ? `
 - UI, config, glue code, CRUD → standard plan (type: execute)
 Each TDD plan gets one feature with RED/GREEN/REFACTOR gate sequence.
 </tdd_mode_active>
+` : ''}
+
+**MVP_MODE:** ${MVP_MODE} (when true, follow vertical-slice rules from `@~/.claude/get-shit-done/references/planner-mvp-mode.md`; when false, ignore MVP guidance entirely.)
+**WALKING_SKELETON:** ${WALKING_SKELETON} (when true, the first deliverable must be a Walking Skeleton — produce SKELETON.md alongside PLAN.md.)
+
+${MVP_MODE === 'true' ? `
+<mvp_mode_active>
+**MVP Mode is ENABLED.** Follow vertical-slice planning rules from @~/.claude/get-shit-done/references/planner-mvp-mode.md. Each plan must deliver a complete vertical slice — thin end-to-end functionality rather than horizontal layers.
+</mvp_mode_active>
 ` : ''}
 </planning_context>
 

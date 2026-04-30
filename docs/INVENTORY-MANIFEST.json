@@ -1,5 +1,5 @@
 {
-  "generated": "2026-04-27",
+  "generated": "2026-04-29",
   "families": {
     "agents": [
       "gsd-advisor-researcher",
@@ -237,6 +237,7 @@
       "planner-antipatterns.md",
       "planner-chunked.md",
       "planner-gap-closure.md",
+      "planner-mvp-mode.md",
       "planner-reviews.md",
       "planner-revision.md",
       "planner-source-audit.md",
@@ -245,6 +246,7 @@
       "questioning.md",
       "revision-loop.md",
       "scout-codebase.md",
+      "skeleton-template.md",
       "sketch-interactivity.md",
       "sketch-theme-system.md",
       "sketch-tooling.md",
