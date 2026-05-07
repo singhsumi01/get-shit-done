@@ -67,6 +67,28 @@ A feature adds something new — a new command, a new workflow, a new concept, a
 
 ---
 
+## Standards-First Contributions
+
+GSD is moving toward a more explicit contributor standard for architecture, terminology, and agent-assisted work. The canonical standards are maintainer-owned:
+
+- `VISION.md` — why these standards exist, how contributors should use them, and how the rollout works
+- `CONTEXT.md` — canonical domain language, module names, recurring mistakes, and workflow learnings
+- `docs/adr/` — accepted Architecture Decision Records (ADRs)
+
+**Contributor expectations:**
+- Read `VISION.md` and `CONTEXT.md` before proposing architecture-impacting work.
+- Read every relevant ADR before changing a seam, command contract, registry, workflow contract, or architectural boundary.
+- Treat accepted ADRs as standards, not suggestions.
+- If you use an AI agent, explicitly prompt it to read `VISION.md`, `CONTEXT.md`, and the relevant ADRs first.
+- In your issue and PR, name the specific standard you followed and the exact ADR/section that constrained your change.
+
+**ADR governance:**
+- ADRs are authored and accepted by maintainers only.
+- Contributor input is welcome in issues/discussions, but contributors should not open drive-by ADR authorship PRs.
+- Once an ADR is accepted, assume it is locked unless a maintainer explicitly reopens it.
+
+This guidance is being socialized before hard enforcement. The intent is to make it a normal part of contribution review around the `1.50` line as the new TDD mode lands.
+
 ## The Issue-First Rule — No Exceptions
 
 > **No code before approval.**
@@ -83,17 +105,36 @@ PRs that arrive without a properly-labeled linked issue are closed automatically
 
 ### Architecture & Domain Standards (Maintainer-Defined)
 
-The following files are maintainer-owned coding standards and must be treated as canonical when contributing:
+The following files are maintainer-owned standards and must be treated as canonical when contributing:
 
-- `CONTEXT.md` — domain language and module naming standards
-- `docs/adr/` — Architecture Decision Records (ADRs) for accepted architectural decisions
+- `VISION.md` — contributor standards vision, ADR governance, and AI-agent expectations
+- `CONTEXT.md` — domain language, module naming standards, recurring PR mistakes, and workflow learnings
+- `docs/adr/` — accepted Architecture Decision Records (ADRs) for architectural decisions that are now standard
 
 Contributor requirements:
-- Read `CONTEXT.md` before naming or refactoring modules/interfaces/seams.
+- Read `VISION.md` and `CONTEXT.md` before naming or refactoring modules/interfaces/seams.
+- Read the relevant ADRs before proposing or implementing architectural changes.
 - Use `CONTEXT.md` vocabulary consistently in code comments, tests, issue/PR text, and docs for the touched area.
-- Check relevant ADRs in `docs/adr/` before proposing or implementing architectural changes.
-- If a change intentionally revisits an ADR decision, call it out explicitly in the linked issue and PR rationale.
-- Do not rewrite maintainer intent in `CONTEXT.md`/ADRs as part of drive-by cleanup; propose focused updates tied to approved scope.
+- Treat accepted ADRs as the default path; if you think one should be revisited, raise that in the issue first instead of quietly coding around it.
+- Do not open contributor-authored ADR files. Maintainership owns ADR creation/final wording.
+- Do not rewrite maintainer intent in `VISION.md` / `CONTEXT.md` / ADRs as part of drive-by cleanup; propose focused updates tied to approved scope.
+
+### AI-Agent Contribution Requirements
+
+If you are using Claude, Cursor, Copilot, or any other coding agent:
+- Prompt the agent to read `VISION.md`, `CONTEXT.md`, and the relevant ADRs before it suggests code.
+- Ask the agent to cite the exact ADR(s) or section(s) it is following.
+- Include that citation in the issue or PR body so reviewers can see which standard shaped the change.
+- Do not use an agent to manufacture vague architecture justification. Reviewers want concrete reasoning tied to the actual standards in this repo.
+
+Recommended issue/PR snippet:
+
+```md
+## Standards followed
+- `VISION.md` — contributor standards / maintainer-owned ADR governance
+- `CONTEXT.md` — used the canonical term `...`
+- `ADR-000X` — followed `...` by `...`
+```
 
 **Every PR must link to an approved issue.** PRs without a linked issue are closed without review, no exceptions.
 
