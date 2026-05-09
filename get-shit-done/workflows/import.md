@@ -173,14 +173,17 @@ Apply GSD naming convention for the output filename:
 - NEVER use `PLAN-01.md`, `plan-01.md`, or any other format
 - NN = phase number (zero-padded), MM = plan number within the phase (zero-padded)
 
-Determine the target directory:
+Determine the target directory by querying init for `expected_phase_dir` (which includes the `project_code` prefix from `.planning/config.json` when set):
+
+```bash
+expected_phase_dir=$(gsd-sdk query init phase-op {NN} --pick expected_phase_dir)
 ```
-.planning/phases/{NN}-{slug}/
-```
+
+`expected_phase_dir` resolves to `<CODE>-{NN}-{slug}/` for projects with a `project_code`, or `{NN}-{slug}/` otherwise — matching the shape produced by `phase.add` / `phase.insert` / `/gsd-discuss-phase` / `/gsd-plan-phase`.
 
 If the directory does not exist, create it:
 ```bash
-mkdir -p ".planning/phases/{NN}-{slug}/"
+mkdir -p "${expected_phase_dir}"
 ```
 
 Write the PLAN.md file to the target directory.

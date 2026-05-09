@@ -139,9 +139,14 @@ grep -c "Pending" .planning/REQUIREMENTS.md
 
 ## 8. Create Phase Directories
 
+For each new phase N you added in step 6, query init for `expected_phase_dir` (which includes the `project_code` prefix from `.planning/config.json` when set) and use that for the `mkdir`:
+
 ```bash
-mkdir -p ".planning/phases/{NN}-{name}"
+expected_phase_dir=$(gsd-sdk query init phase-op {N} --pick expected_phase_dir)
+mkdir -p "${expected_phase_dir}"
 ```
+
+Repeat for every new phase (`{N}` through `{M}`). Do not construct `.planning/phases/{NN}-{name}` inline — that path skips the `project_code` prefix and yields mixed naming with `phase.add` / `phase.insert` / `/gsd-discuss-phase` / `/gsd-plan-phase`, all of which apply the prefix.
 
 ## 9. Commit Roadmap and Requirements Update
 
