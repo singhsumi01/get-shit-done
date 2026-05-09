@@ -49,16 +49,23 @@ Plans:
 
 ## Step 4: Create the phase directory
 
+Read the project_code prefix first so the directory name matches the convention
+used by `phase.add` / `phase.insert` (e.g. `CK-999.1-my-idea`). When
+`project_code` is empty or absent the prefix expands to nothing, preserving
+current behavior for projects that do not set one (k301: graceful root fallback).
+
 ```bash
 SLUG=$(gsd-sdk query generate-slug "$ARGUMENTS" --raw)
-mkdir -p ".planning/phases/${NEXT}-${SLUG}"
-touch ".planning/phases/${NEXT}-${SLUG}/.gitkeep"
+PREFIX=$(gsd-sdk query config-get project_code --raw 2>/dev/null || echo "")
+DIR="${PREFIX:+${PREFIX}-}${NEXT}-${SLUG}"
+mkdir -p ".planning/phases/${DIR}"
+touch ".planning/phases/${DIR}/.gitkeep"
 ```
 
 ## Step 5: Commit
 
 ```bash
-gsd-sdk query commit "docs: add backlog item ${NEXT} — ${ARGUMENTS}" --files .planning/ROADMAP.md ".planning/phases/${NEXT}-${SLUG}/.gitkeep"
+gsd-sdk query commit "docs: add backlog item ${NEXT} — ${ARGUMENTS}" --files .planning/ROADMAP.md ".planning/phases/${DIR}/.gitkeep"
 ```
 
 ## Step 6: Report
@@ -67,7 +74,7 @@ gsd-sdk query commit "docs: add backlog item ${NEXT} — ${ARGUMENTS}" --files .
 ## 📋 Backlog Item Added
 
 Phase {NEXT}: {description}
-Directory: .planning/phases/{NEXT}-{slug}/
+Directory: .planning/phases/{DIR}/
 
 This item lives in the backlog parking lot.
 Use /gsd-discuss-phase {NEXT} to explore it further.

@@ -111,12 +111,13 @@ describe('#3297: add-backlog.md must apply project_code prefix to phase director
     const usesPrefixOrDir =
       reportSection.includes('${DIR}') ||
       reportSection.includes('$DIR') ||
+      reportSection.includes('{DIR}') ||
       reportSection.includes('PREFIX') ||
       reportSection.includes('{prefix}') ||
       reportSection.includes('{dir}');
     assert.ok(
       usesPrefixOrDir,
-      'Step 6 report section must reference the prefixed directory name (${DIR}, $DIR, or {dir})',
+      'Step 6 report section must reference the prefixed directory name (${DIR}, $DIR, {DIR}, or {dir})',
     );
   });
 });
