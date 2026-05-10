@@ -1,14 +1,14 @@
 'use strict';
 
 /**
- * runtime-homes.cjs — canonical runtime → global config/skills directory mapping.
+ * runtime-homes.cjs — Runtime Install Materialization Module.
  *
- * Single source of truth for resolving the global config base directory and
- * the correct global skills directory for every GSD-supported runtime.
+ * Single source of truth for resolving runtime install metadata, the global
+ * config base directory, and the correct global skills directory for every
+ * GSD-supported runtime.
  *
- * Mirrors the logic in bin/install.js getGlobalDir() but as a pure,
- * side-effect-free module safe to require() at any point without triggering
- * the installer. bin/install.js is the authoritative source — keep in sync.
+ * This is a pure, side-effect-free module safe to require() at any point
+ * without triggering the installer.
  *
  * Runtime-specific notes:
  *   hermes  — GSD skills nest under skills/gsd/<skillName>/ (not the flat
@@ -23,6 +23,151 @@
 const os = require('os');
 const path = require('path');
 
+const DEFAULT_RUNTIME = 'claude';
+
+const RUNTIME_INSTALL_ADAPTERS = Object.freeze({
+  claude: Object.freeze({
+    runtime: 'claude',
+    label: 'Claude Code',
+    localDirName: '.claude',
+    globalHomeSegments: ['.claude'],
+    configEnvVar: 'CLAUDE_CONFIG_DIR',
+    skillsLayout: 'flat',
+    ownedCleanupDirs: ['commands', 'agents', 'hooks', 'skills', 'get-shit-done'],
+  }),
+  opencode: Object.freeze({
+    runtime: 'opencode',
+    label: 'OpenCode',
+    localDirName: '.opencode',
+    globalHomeSegments: ['.config', 'opencode'],
+    configEnvVar: 'OPENCODE_CONFIG_DIR',
+    configFileEnvVar: 'OPENCODE_CONFIG',
+    xdgConfigDirName: 'opencode',
+    skillsLayout: 'flat',
+    ownedCleanupDirs: ['commands', 'agents', 'hooks', 'skills', 'get-shit-done'],
+  }),
+  gemini: Object.freeze({
+    runtime: 'gemini',
+    label: 'Gemini CLI',
+    localDirName: '.gemini',
+    globalHomeSegments: ['.gemini'],
+    configEnvVar: 'GEMINI_CONFIG_DIR',
+    skillsLayout: 'flat',
+    ownedCleanupDirs: ['commands', 'agents', 'hooks', 'skills', 'get-shit-done'],
+  }),
+  kilo: Object.freeze({
+    runtime: 'kilo',
+    label: 'Kilo',
+    localDirName: '.kilo',
+    globalHomeSegments: ['.config', 'kilo'],
+    configEnvVar: 'KILO_CONFIG_DIR',
+    configFileEnvVar: 'KILO_CONFIG',
+    xdgConfigDirName: 'kilo',
+    skillsLayout: 'flat',
+    ownedCleanupDirs: ['commands', 'agents', 'hooks', 'skills', 'get-shit-done'],
+  }),
+  codex: Object.freeze({
+    runtime: 'codex',
+    label: 'Codex',
+    localDirName: '.codex',
+    globalHomeSegments: ['.codex'],
+    configEnvVar: 'CODEX_HOME',
+    skillsLayout: 'flat',
+    ownedCleanupDirs: ['agents', 'hooks', 'skills', 'get-shit-done'],
+  }),
+  copilot: Object.freeze({
+    runtime: 'copilot',
+    label: 'Copilot',
+    localDirName: '.github',
+    globalHomeSegments: ['.copilot'],
+    configEnvVar: 'COPILOT_CONFIG_DIR',
+    skillsLayout: 'flat',
+    ownedCleanupDirs: ['instructions', 'prompts', 'skills', 'get-shit-done'],
+  }),
+  antigravity: Object.freeze({
+    runtime: 'antigravity',
+    label: 'Antigravity',
+    localDirName: '.agent',
+    globalHomeSegments: ['.gemini', 'antigravity'],
+    configEnvVar: 'ANTIGRAVITY_CONFIG_DIR',
+    skillsLayout: 'flat',
+    ownedCleanupDirs: ['agents', 'commands', 'hooks', 'skills', 'get-shit-done'],
+  }),
+  cursor: Object.freeze({
+    runtime: 'cursor',
+    label: 'Cursor',
+    localDirName: '.cursor',
+    globalHomeSegments: ['.cursor'],
+    configEnvVar: 'CURSOR_CONFIG_DIR',
+    skillsLayout: 'flat',
+    ownedCleanupDirs: ['commands', 'agents', 'hooks', 'skills', 'get-shit-done'],
+  }),
+  windsurf: Object.freeze({
+    runtime: 'windsurf',
+    label: 'Windsurf',
+    localDirName: '.windsurf',
+    globalHomeSegments: ['.codeium', 'windsurf'],
+    configEnvVar: 'WINDSURF_CONFIG_DIR',
+    skillsLayout: 'flat',
+    ownedCleanupDirs: ['commands', 'agents', 'hooks', 'skills', 'get-shit-done'],
+  }),
+  augment: Object.freeze({
+    runtime: 'augment',
+    label: 'Augment',
+    localDirName: '.augment',
+    globalHomeSegments: ['.augment'],
+    configEnvVar: 'AUGMENT_CONFIG_DIR',
+    skillsLayout: 'flat',
+    ownedCleanupDirs: ['commands', 'agents', 'hooks', 'skills', 'get-shit-done'],
+  }),
+  trae: Object.freeze({
+    runtime: 'trae',
+    label: 'Trae',
+    localDirName: '.trae',
+    globalHomeSegments: ['.trae'],
+    configEnvVar: 'TRAE_CONFIG_DIR',
+    skillsLayout: 'flat',
+    ownedCleanupDirs: ['commands', 'agents', 'hooks', 'skills', 'get-shit-done'],
+  }),
+  qwen: Object.freeze({
+    runtime: 'qwen',
+    label: 'Qwen Code',
+    localDirName: '.qwen',
+    globalHomeSegments: ['.qwen'],
+    configEnvVar: 'QWEN_CONFIG_DIR',
+    skillsLayout: 'flat',
+    ownedCleanupDirs: ['commands', 'agents', 'hooks', 'skills', 'get-shit-done'],
+  }),
+  hermes: Object.freeze({
+    runtime: 'hermes',
+    label: 'Hermes Agent',
+    localDirName: '.hermes',
+    globalHomeSegments: ['.hermes'],
+    configEnvVar: 'HERMES_HOME',
+    skillsLayout: 'category',
+    skillCategory: 'gsd',
+    ownedCleanupDirs: ['agents', 'hooks', 'skills/gsd', 'get-shit-done'],
+  }),
+  codebuddy: Object.freeze({
+    runtime: 'codebuddy',
+    label: 'CodeBuddy',
+    localDirName: '.codebuddy',
+    globalHomeSegments: ['.codebuddy'],
+    configEnvVar: 'CODEBUDDY_CONFIG_DIR',
+    skillsLayout: 'flat',
+    ownedCleanupDirs: ['commands', 'agents', 'hooks', 'skills', 'get-shit-done'],
+  }),
+  cline: Object.freeze({
+    runtime: 'cline',
+    label: 'Cline',
+    localDirName: '.cline',
+    globalHomeSegments: ['.cline'],
+    configEnvVar: 'CLINE_CONFIG_DIR',
+    skillsLayout: 'none',
+    ownedCleanupDirs: ['get-shit-done'],
+  }),
+});
+
 /**
  * Expand a leading ~ to os.homedir().
  * @param {string} p
@@ -34,6 +179,20 @@ function expandTilde(p) {
   return p;
 }
 
+function getRuntimeInstallAdapter(runtime) {
+  return RUNTIME_INSTALL_ADAPTERS[runtime] || RUNTIME_INSTALL_ADAPTERS[DEFAULT_RUNTIME];
+}
+
+function getRuntimeLocalDirName(runtime) {
+  return getRuntimeInstallAdapter(runtime).localDirName;
+}
+
+function getConfigDirFromHome(runtime, isGlobal) {
+  const adapter = getRuntimeInstallAdapter(runtime);
+  const segments = isGlobal ? adapter.globalHomeSegments : [adapter.localDirName];
+  return segments.map((segment) => `'${segment}'`).join(', ');
+}
+
 /**
  * Return the global config base directory for the given runtime.
  * Respects the same env-var overrides as bin/install.js getGlobalDir().
@@ -42,87 +201,29 @@ function expandTilde(p) {
  * @returns {string} Absolute path to the runtime's global config directory
  */
 function getGlobalConfigDir(runtime) {
+  return getGlobalConfigDirForInstall(runtime, null);
+}
+
+function getGlobalConfigDirForInstall(runtime, explicitDir = null) {
+  if (explicitDir) return expandTilde(explicitDir);
+
   const home = os.homedir();
   const env = process.env;
+  const adapter = getRuntimeInstallAdapter(runtime);
 
-  switch (runtime) {
-    // ── Claude Code ──────────────────────────────────────────────────────────
-    case 'claude':
-      return env.CLAUDE_CONFIG_DIR ? expandTilde(env.CLAUDE_CONFIG_DIR) : path.join(home, '.claude');
-
-    // ── Cursor ───────────────────────────────────────────────────────────────
-    case 'cursor':
-      return env.CURSOR_CONFIG_DIR ? expandTilde(env.CURSOR_CONFIG_DIR) : path.join(home, '.cursor');
-
-    // ── Gemini CLI ───────────────────────────────────────────────────────────
-    case 'gemini':
-      return env.GEMINI_CONFIG_DIR ? expandTilde(env.GEMINI_CONFIG_DIR) : path.join(home, '.gemini');
-
-    // ── Codex ────────────────────────────────────────────────────────────────
-    case 'codex':
-      return env.CODEX_HOME ? expandTilde(env.CODEX_HOME) : path.join(home, '.codex');
-
-    // ── Copilot (VS Code) ────────────────────────────────────────────────────
-    case 'copilot':
-      return env.COPILOT_CONFIG_DIR ? expandTilde(env.COPILOT_CONFIG_DIR) : path.join(home, '.copilot');
-
-    // ── Antigravity ──────────────────────────────────────────────────────────
-    case 'antigravity':
-      return env.ANTIGRAVITY_CONFIG_DIR
-        ? expandTilde(env.ANTIGRAVITY_CONFIG_DIR)
-        : path.join(home, '.gemini', 'antigravity');
-
-    // ── Windsurf ─────────────────────────────────────────────────────────────
-    case 'windsurf':
-      return env.WINDSURF_CONFIG_DIR
-        ? expandTilde(env.WINDSURF_CONFIG_DIR)
-        : path.join(home, '.codeium', 'windsurf');
-
-    // ── Augment ──────────────────────────────────────────────────────────────
-    case 'augment':
-      return env.AUGMENT_CONFIG_DIR ? expandTilde(env.AUGMENT_CONFIG_DIR) : path.join(home, '.augment');
-
-    // ── Trae ─────────────────────────────────────────────────────────────────
-    case 'trae':
-      return env.TRAE_CONFIG_DIR ? expandTilde(env.TRAE_CONFIG_DIR) : path.join(home, '.trae');
-
-    // ── Qwen Code ────────────────────────────────────────────────────────────
-    case 'qwen':
-      return env.QWEN_CONFIG_DIR ? expandTilde(env.QWEN_CONFIG_DIR) : path.join(home, '.qwen');
-
-    // ── Hermes Agent ─────────────────────────────────────────────────────────
-    // Note: skills use a nested layout (skills/gsd/<skill>/) — see getGlobalSkillDir().
-    case 'hermes':
-      return env.HERMES_HOME ? expandTilde(env.HERMES_HOME) : path.join(home, '.hermes');
-
-    // ── CodeBuddy ────────────────────────────────────────────────────────────
-    case 'codebuddy':
-      return env.CODEBUDDY_CONFIG_DIR ? expandTilde(env.CODEBUDDY_CONFIG_DIR) : path.join(home, '.codebuddy');
-
-    // ── Cline ────────────────────────────────────────────────────────────────
-    // Note: Cline is rules-based (.clinerules) — no skills/ directory.
-    // getGlobalSkillDir() returns null for cline.
-    case 'cline':
-      return env.CLINE_CONFIG_DIR ? expandTilde(env.CLINE_CONFIG_DIR) : path.join(home, '.cline');
-
-    // ── OpenCode (XDG) ───────────────────────────────────────────────────────
-    case 'opencode': {
-      if (env.OPENCODE_CONFIG_DIR) return expandTilde(env.OPENCODE_CONFIG_DIR);
-      if (env.XDG_CONFIG_HOME) return path.join(expandTilde(env.XDG_CONFIG_HOME), 'opencode');
-      return path.join(home, '.config', 'opencode');
-    }
-
-    // ── Kilo (XDG) ───────────────────────────────────────────────────────────
-    case 'kilo': {
-      if (env.KILO_CONFIG_DIR) return expandTilde(env.KILO_CONFIG_DIR);
-      if (env.XDG_CONFIG_HOME) return path.join(expandTilde(env.XDG_CONFIG_HOME), 'kilo');
-      return path.join(home, '.config', 'kilo');
-    }
-
-    // ── Default (Claude fallback) ─────────────────────────────────────────────
-    default:
-      return env.CLAUDE_CONFIG_DIR ? expandTilde(env.CLAUDE_CONFIG_DIR) : path.join(home, '.claude');
+  if (adapter.configEnvVar && env[adapter.configEnvVar]) {
+    return expandTilde(env[adapter.configEnvVar]);
   }
+
+  if (adapter.configFileEnvVar && env[adapter.configFileEnvVar]) {
+    return path.dirname(expandTilde(env[adapter.configFileEnvVar]));
+  }
+
+  if (adapter.xdgConfigDirName && env.XDG_CONFIG_HOME) {
+    return path.join(expandTilde(env.XDG_CONFIG_HOME), adapter.xdgConfigDirName);
+  }
+
+  return path.join(home, ...adapter.globalHomeSegments);
 }
 
 /**
@@ -135,9 +236,10 @@ function getGlobalConfigDir(runtime) {
  * @returns {string|null}
  */
 function getGlobalSkillsBase(runtime) {
-  if (runtime === 'cline') return null;
+  const adapter = getRuntimeInstallAdapter(runtime);
+  if (adapter.skillsLayout === 'none') return null;
   const configDir = getGlobalConfigDir(runtime);
-  if (runtime === 'hermes') return path.join(configDir, 'skills', 'gsd');
+  if (adapter.skillsLayout === 'category') return path.join(configDir, 'skills', adapter.skillCategory);
   return path.join(configDir, 'skills');
 }
 
@@ -171,7 +273,12 @@ function getGlobalSkillDisplayPath(runtime, skillName) {
 }
 
 module.exports = {
+  RUNTIME_INSTALL_ADAPTERS,
+  getRuntimeInstallAdapter,
+  getRuntimeLocalDirName,
+  getConfigDirFromHome,
   getGlobalConfigDir,
+  getGlobalConfigDirForInstall,
   getGlobalSkillsBase,
   getGlobalSkillDir,
   getGlobalSkillDisplayPath,

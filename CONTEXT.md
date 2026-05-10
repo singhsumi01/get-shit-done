@@ -64,6 +64,9 @@ Module owning SDK-to-`get-shit-done-cc` compatibility policy: legacy asset disco
 ### Runtime-Global Skills Policy Module
 Module owning runtime-aware global skills directory policy for SDK query surfaces. Resolves runtime-global skills bases/skill paths from runtime + env precedence, renders display paths for warnings/manifests, and reports unsupported runtimes with no skills directory.
 
+### Runtime Install Materialization Module
+Module owning runtime install Adapter metadata for installer-facing path/layout policy: runtime labels, local install directories, global config env precedence, skills layout (`flat`, category, or none), and GSD-owned cleanup roots. Installer call sites delegate to this Interface instead of re-encoding runtime branches.
+
 ### MVP Mode
 Phase-level planning mode that frames work as a vertical slice (UI → API → DB) of one user-visible capability instead of horizontal layers. Resolved at workflow init via the precedence chain: `--mvp` CLI flag → ROADMAP.md `**Mode:** mvp` field → `workflow.mvp_mode` config → false. All-or-nothing per phase (PRD #2826 Q1). Surfaced as `MVP_MODE=true|false` to the planner, executor, verifier, and discovery surfaces (progress, stats, graphify). Canonical parser: `roadmap.cjs` `**Mode:**` field; canonical resolution chain documented in `workflows/plan-phase.md`. Concept index: `references/mvp-concepts.md`.
 

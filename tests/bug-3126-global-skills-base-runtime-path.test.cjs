@@ -23,7 +23,12 @@ const os = require('node:os');
 
 const ROOT = path.join(__dirname, '..');
 const {
+  RUNTIME_INSTALL_ADAPTERS,
+  getRuntimeInstallAdapter,
+  getRuntimeLocalDirName,
+  getConfigDirFromHome,
   getGlobalConfigDir,
+  getGlobalConfigDirForInstall,
   getGlobalSkillsBase,
   getGlobalSkillDir,
   getGlobalSkillDisplayPath,
@@ -66,7 +71,7 @@ describe('bug #3126: runtime-homes getGlobalConfigDir — defaults', () => {
         'CODEX_HOME','COPILOT_CONFIG_DIR','ANTIGRAVITY_CONFIG_DIR','WINDSURF_CONFIG_DIR',
         'AUGMENT_CONFIG_DIR','TRAE_CONFIG_DIR','QWEN_CONFIG_DIR','HERMES_HOME',
         'CODEBUDDY_CONFIG_DIR','CLINE_CONFIG_DIR','OPENCODE_CONFIG_DIR','KILO_CONFIG_DIR',
-        'XDG_CONFIG_HOME'];
+        'OPENCODE_CONFIG','KILO_CONFIG','XDG_CONFIG_HOME'];
       const saved = {};
       for (const k of envKeys) { saved[k] = process.env[k]; delete process.env[k]; }
       try {
@@ -105,16 +110,72 @@ describe('bug #3126: runtime-homes env-var overrides', () => {
   });
   test('opencode uses XDG_CONFIG_HOME when OPENCODE_CONFIG_DIR absent', () => {
     withEnv('OPENCODE_CONFIG_DIR', undefined, () => {
-      withEnv('XDG_CONFIG_HOME', '/xdg', () => {
-        assert.strictEqual(getGlobalConfigDir('opencode'), '/xdg/opencode');
+      withEnv('OPENCODE_CONFIG', undefined, () => {
+        withEnv('XDG_CONFIG_HOME', '/xdg', () => {
+          assert.strictEqual(getGlobalConfigDir('opencode'), '/xdg/opencode');
+        });
+      });
+    });
+  });
+  test('opencode uses OPENCODE_CONFIG dirname before XDG_CONFIG_HOME', () => {
+    withEnv('OPENCODE_CONFIG_DIR', undefined, () => {
+      withEnv('OPENCODE_CONFIG', '/custom/opencode/config.json', () => {
+        withEnv('XDG_CONFIG_HOME', '/xdg', () => {
+          assert.strictEqual(getGlobalConfigDir('opencode'), '/custom/opencode');
+        });
       });
     });
   });
   test('kilo uses XDG_CONFIG_HOME when KILO_CONFIG_DIR absent', () => {
     withEnv('KILO_CONFIG_DIR', undefined, () => {
-      withEnv('XDG_CONFIG_HOME', '/xdg', () => {
-        assert.strictEqual(getGlobalConfigDir('kilo'), '/xdg/kilo');
+      withEnv('KILO_CONFIG', undefined, () => {
+        withEnv('XDG_CONFIG_HOME', '/xdg', () => {
+          assert.strictEqual(getGlobalConfigDir('kilo'), '/xdg/kilo');
+        });
       });
+    });
+  });
+  test('kilo uses KILO_CONFIG dirname before XDG_CONFIG_HOME', () => {
+    withEnv('KILO_CONFIG_DIR', undefined, () => {
+      withEnv('KILO_CONFIG', '/custom/kilo/settings.json', () => {
+        withEnv('XDG_CONFIG_HOME', '/xdg', () => {
+          assert.strictEqual(getGlobalConfigDir('kilo'), '/custom/kilo');
+        });
+      });
+    });
+  });
+});
+
+describe('runtime install materialization adapters', () => {
+  test('adapters expose runtime metadata, local dirs, layouts, and cleanup ownership', () => {
+    for (const [runtime, adapter] of Object.entries(RUNTIME_INSTALL_ADAPTERS)) {
+      assert.strictEqual(adapter.runtime, runtime);
+      assert.ok(adapter.label, `${runtime} adapter has a label`);
+      assert.ok(adapter.localDirName, `${runtime} adapter has a localDirName`);
+      assert.ok(['flat', 'category', 'none'].includes(adapter.skillsLayout),
+        `${runtime} adapter has a known skillsLayout`);
+      assert.ok(Array.isArray(adapter.ownedCleanupDirs),
+        `${runtime} adapter declares owned cleanup dirs`);
+    }
+  });
+
+  test('Hermes and Cline exercise different skills layout adapters', () => {
+    assert.strictEqual(getRuntimeInstallAdapter('hermes').skillsLayout, 'category');
+    assert.strictEqual(getRuntimeInstallAdapter('hermes').skillCategory, 'gsd');
+    assert.strictEqual(getRuntimeInstallAdapter('cline').skillsLayout, 'none');
+    assert.strictEqual(getGlobalSkillsBase('cline'), null);
+  });
+
+  test('runtime install adapter resolves local dir and config-dir fragments', () => {
+    assert.strictEqual(getRuntimeLocalDirName('hermes'), '.hermes');
+    assert.strictEqual(getRuntimeLocalDirName('cline'), '.cline');
+    assert.strictEqual(getConfigDirFromHome('antigravity', false), "'.agent'");
+    assert.strictEqual(getConfigDirFromHome('antigravity', true), "'.gemini', 'antigravity'");
+  });
+
+  test('explicit install config dir has precedence at the module seam', () => {
+    withEnv('HERMES_HOME', '~/from-env', () => {
+      assert.strictEqual(getGlobalConfigDirForInstall('hermes', '/explicit/hermes'), '/explicit/hermes');
     });
   });
 });
