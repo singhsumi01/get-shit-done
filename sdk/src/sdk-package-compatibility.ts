@@ -2,8 +2,8 @@ import { existsSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { isAbsolute, join, normalize, relative, resolve } from 'node:path';
+import { readFile, realpath } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { GSDError, ErrorClassification } from './errors.js';
 
@@ -151,9 +151,23 @@ function missingLegacyGsdToolsResult(resolution: LegacySdkAssetResolution): Lega
 }
 
 function cjsCommandArgs(command: string, args: string[], workstream?: string): string[] {
-  const commandArgs = command.includes('.') ? command.split('.') : command.trim().split(/\s+/).filter(Boolean);
+  const dotIndex = command.indexOf('.');
+  const commandArgs = dotIndex >= 0
+    ? [command.slice(0, dotIndex).trim(), command.slice(dotIndex + 1).trim()].filter(Boolean)
+    : command.trim().split(/\s+/).filter(Boolean);
   const wsArgs = workstream ? ['--ws', workstream] : [];
   return [...commandArgs, ...args, ...wsArgs];
+}
+
+async function resolveFileOutputPathUnderProject(projectDir: string, filePath: string): Promise<string> {
+  const projectReal = await realpath(projectDir);
+  const candidate = isAbsolute(filePath) ? normalize(filePath) : resolve(projectReal, filePath);
+  const realCandidate = await realpath(candidate);
+  const rel = relative(projectReal, realCandidate);
+  if (rel.startsWith('..') || (isAbsolute(rel) && rel.length > 0)) {
+    throw new Error(`@file path escapes project directory: ${filePath}`);
+  }
+  return realCandidate;
 }
 
 async function parseLegacyJsonOutput(raw: string, projectDir: string): Promise<unknown> {
@@ -162,7 +176,7 @@ async function parseLegacyJsonOutput(raw: string, projectDir: string): Promise<u
   let jsonStr = trimmed;
   if (jsonStr.startsWith('@file:')) {
     const filePath = jsonStr.slice(6).trim();
-    const resolvedPath = isAbsolute(filePath) ? filePath : resolve(projectDir, filePath);
+    const resolvedPath = await resolveFileOutputPathUnderProject(projectDir, filePath);
     jsonStr = await readFile(resolvedPath, 'utf-8');
   }
   return JSON.parse(jsonStr);
@@ -226,6 +240,13 @@ export async function runLegacyGsdTools(input: LegacyGsdToolsRunInput): Promise<
   const fullArgs = [gsdToolsPath, ...cjsCommandArgs(input.command, args, input.workstream)];
 
   return new Promise<LegacyGsdToolsResult>((resolveResult) => {
+    let settled = false;
+    const settle = (result: LegacyGsdToolsResult): void => {
+      if (settled) return;
+      settled = true;
+      resolveResult(result);
+    };
+
     const child = execFile(
       process.execPath,
       fullArgs,
@@ -237,13 +258,15 @@ export async function runLegacyGsdTools(input: LegacyGsdToolsRunInput): Promise<
         env: { ...process.env },
       },
       async (error, stdout, stderr) => {
+        if (settled) return;
+
         const stdoutText = stdout?.toString() ?? '';
         const stderrText = stderr?.toString() ?? '';
 
         if (error) {
           const err = error as Error & { code?: unknown; status?: number | null; signal?: NodeJS.Signals | null; killed?: boolean };
           if (err.killed || err.signal === 'SIGKILL' || err.code === 'ETIMEDOUT') {
-            resolveResult({
+            settle({
               ok: false,
               reason: 'timeout',
               message: `gsd-tools timed out after ${timeoutMs}ms: ${input.command} ${args.join(' ')}`.trim(),
@@ -253,7 +276,18 @@ export async function runLegacyGsdTools(input: LegacyGsdToolsRunInput): Promise<
             return;
           }
 
-          resolveResult({
+          if (typeof err.code === 'string') {
+            settle({
+              ok: false,
+              reason: 'spawn_failed',
+              message: `Failed to execute gsd-tools: ${err.message}`,
+              stderr: stderrText,
+              exitCode: null,
+            });
+            return;
+          }
+
+          settle({
             ok: false,
             reason: 'nonzero_exit',
             message: `gsd-tools exited with code ${err.code ?? err.status ?? 'unknown'}: ${input.command} ${args.join(' ')}`.trim(),
@@ -263,12 +297,12 @@ export async function runLegacyGsdTools(input: LegacyGsdToolsRunInput): Promise<
           return;
         }
 
-        resolveResult(await projectLegacyOutput(stdoutText, stderrText, input.projectDir, mode));
+        settle(await projectLegacyOutput(stdoutText, stderrText, input.projectDir, mode));
       },
     );
 
-    child.on('error', (err) => {
-      resolveResult({
+    child.once('error', (err) => {
+      settle({
         ok: false,
         reason: 'spawn_failed',
         message: `Failed to execute gsd-tools: ${err.message}`,

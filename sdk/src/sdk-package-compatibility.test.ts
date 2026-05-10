@@ -133,6 +133,24 @@ describe('SDK Package Seam Module', () => {
     });
   });
 
+  it('splits dotted legacy commands on the first dot only', async () => {
+    const script = await createScript('dotted.cjs', `process.stdout.write(JSON.stringify({ argv: process.argv.slice(2) }));`);
+
+    const result = await runLegacyGsdTools({
+      projectDir: tmpDir!,
+      gsdToolsPath: script,
+      command: 'check.decision-coverage.plan',
+      mode: 'json',
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      mode: 'json',
+      data: { argv: ['check', 'decision-coverage.plan'] },
+      stderr: '',
+    });
+  });
+
   it('parses @file JSON output from legacy gsd-tools', async () => {
     const planningDir = join(tmpDir!, '.planning');
     await mkdir(planningDir, { recursive: true });
@@ -147,6 +165,27 @@ describe('SDK Package Seam Module', () => {
     });
 
     expect(result).toEqual({ ok: true, mode: 'json', data: { from: 'file' }, stderr: '' });
+  });
+
+  it('rejects @file JSON output paths that escape the project', async () => {
+    const project = join(tmpDir!, 'project');
+    await mkdir(project, { recursive: true });
+    await writeFile(join(tmpDir!, 'outside.json'), JSON.stringify({ outside: true }));
+    const script = await createScript('escape-file.cjs', `process.stdout.write('@file:../outside.json');`);
+
+    const result = await runLegacyGsdTools({
+      projectDir: project,
+      gsdToolsPath: script,
+      command: 'state.load',
+      mode: 'json',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('parse_failed');
+      expect(result.message).toContain('@file path escapes project directory');
+      expect(result.exitCode).toBe(0);
+    }
   });
 
   it('classifies auto output as text when legacy output is not JSON', async () => {
@@ -196,6 +235,23 @@ describe('SDK Package Seam Module', () => {
       expect(result.reason).toBe('nonzero_exit');
       expect(result.exitCode).toBe(7);
       expect(result.stderr).toBe('bad command');
+    }
+  });
+
+  it('classifies spawn failures from legacy gsd-tools', async () => {
+    const script = await createScript('spawn.cjs', `process.stdout.write(JSON.stringify({ ok: true }));`);
+
+    const result = await runLegacyGsdTools({
+      projectDir: join(tmpDir!, 'missing-cwd'),
+      gsdToolsPath: script,
+      command: 'state',
+      args: ['load'],
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('spawn_failed');
+      expect(result.exitCode).toBeNull();
     }
   });
 

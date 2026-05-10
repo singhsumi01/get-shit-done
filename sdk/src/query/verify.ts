@@ -668,22 +668,11 @@ export const verifyCodebaseDrift: QueryHandler = async (_args, projectDir) => {
     return { data: result.data };
   }
 
-  if (result.ok) {
-    return {
-      data: {
-        skipped: true,
-        reason: 'sdk-parse-failed',
-        action_required: false,
-        directive: 'none',
-        elements: [],
-      },
-    };
-  }
-
+  const failure = result as Extract<typeof result, { ok: false }>;
   return {
     data: {
       skipped: true,
-      reason: `sdk-${result.reason}: ${result.message}`,
+      reason: `sdk-${failure.reason}: ${failure.message}`,
       action_required: false,
       directive: 'none',
       elements: [],

@@ -746,8 +746,8 @@ export const roadmapAnnotateDependencies: QueryHandler = async (args, projectDir
   });
 
   if (result.ok && result.mode === 'json') return { data: result.data };
-  if (result.ok) return { data: { updated: false, reason: 'failed to parse gsd-tools output' } };
-  return { data: { updated: false, reason: result.stderr.trim() || result.message } };
+  const failure = result as Extract<typeof result, { ok: false }>;
+  return { data: { updated: false, reason: failure.stderr.trim() || failure.message } };
 };
 
 
