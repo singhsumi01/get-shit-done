@@ -1454,9 +1454,7 @@ function cmdStateSync(cwd, options, raw) {
   }
 
   const verify = options && options.verify;
-  const content = fs.readFileSync(statePath, 'utf-8');
   const changes = [];
-  let modified = content;
   const today = new Date().toISOString().split('T')[0];
 
   const phasesDir = planningPaths(cwd).phases;
@@ -1477,20 +1475,12 @@ function cmdStateSync(cwd, options, raw) {
     return;
   }
 
-  let totalDiskPlans = 0;
-  let totalDiskSummaries = 0;
-  let diskCompletedPhases = 0;
   let highestIncompletePhase = null;
-  let highestIncompletePhaseNum = null;
   let highestIncompletePhaseplanCount = 0;
-  let highestIncompletePhaseSummaryCount = 0;
 
   for (const dir of entries) {
     const dirPath = path.join(phasesDir, dir);
-    const { planCount: plans, summaryCount: summaries, completed } = scanPhasePlans(dirPath);
-    totalDiskPlans += plans;
-    totalDiskSummaries += summaries;
-    if (completed) diskCompletedPhases++;
+    const { planCount: plans, summaryCount: summaries } = scanPhasePlans(dirPath);
 
     // Track the highest phase with incomplete plans (or any plans)
     const phaseMatch = dir.match(/^(\d+[A-Z]?(?:\.\d+)*)/i);
@@ -1498,79 +1488,108 @@ function cmdStateSync(cwd, options, raw) {
       if (summaries < plans) {
         // Incomplete phase — this is likely the current one
         highestIncompletePhase = dir;
-        highestIncompletePhaseNum = phaseMatch[1];
         highestIncompletePhaseplanCount = plans;
-        highestIncompletePhaseSummaryCount = summaries;
       } else if (!highestIncompletePhase) {
         // All complete, track as potential current
         highestIncompletePhase = dir;
-        highestIncompletePhaseNum = phaseMatch[1];
         highestIncompletePhaseplanCount = plans;
-        highestIncompletePhaseSummaryCount = summaries;
       }
     }
   }
 
-  // Determine total phases from ROADMAP (may be larger than realized disk dirs).
-  // Mirrors the logic in buildStateFrontmatter so both report consistent percents (#3242 Bug B).
-  let syncTotalPhases = null;
-  try {
-    const isDirInMilestone = getMilestonePhaseFilter(cwd);
-    if (isDirInMilestone.phaseCount > 0) {
-      syncTotalPhases = Math.max(entries.length, isDirInMilestone.phaseCount);
-    } else {
-      syncTotalPhases = entries.length;
+  const applyPlanAndActivity = (input) => {
+    let modified = input;
+    if (highestIncompletePhase) {
+      const currentPlansField = stateExtractField(modified, 'Total Plans in Phase');
+      if (currentPlansField && parseInt(currentPlansField, 10) !== highestIncompletePhaseplanCount) {
+        const result = stateReplaceField(modified, 'Total Plans in Phase', String(highestIncompletePhaseplanCount));
+        if (result) modified = result;
+      }
     }
-  } catch { /* intentionally empty */ }
 
-  // Sync Total Plans in Phase
-  if (highestIncompletePhase) {
-    const currentPlansField = stateExtractField(modified, 'Total Plans in Phase');
-    if (currentPlansField && parseInt(currentPlansField, 10) !== highestIncompletePhaseplanCount) {
-      changes.push(`Total Plans in Phase: ${currentPlansField} -> ${highestIncompletePhaseplanCount}`);
-      const result = stateReplaceField(modified, 'Total Plans in Phase', String(highestIncompletePhaseplanCount));
-      if (result) modified = result;
-    }
-  }
+    const result = stateReplaceField(modified, 'Last Activity', today);
+    if (result) modified = result;
+    return modified;
+  };
 
-  // Sync Progress — use shared helper so formula stays in one place (#3242 Bug B).
-  // computeProgressPercent applies min(plan_fraction, phase_fraction) so unrealised
-  // ROADMAP phases cap the reported percent rather than allowing a false 100%.
-  const percent = (() => {
-    const p = computeProgressPercent(totalDiskSummaries, totalDiskPlans, diskCompletedPhases, syncTotalPhases);
-    return p !== null ? p : 0;
-  })();
-  const currentProgress = stateExtractField(modified, 'Progress');
-  if (currentProgress) {
-    const currentPercent = parseInt(currentProgress.replace(/[^\d]/g, ''), 10);
-    if (currentPercent !== percent) {
-      const barWidth = 10;
-      const filled = Math.round(percent / 100 * barWidth);
-      const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(barWidth - filled);
-      const progressStr = `[${bar}] ${percent}%`;
-      changes.push(`Progress: ${currentProgress} -> ${progressStr}`);
-      const result = stateReplaceField(modified, 'Progress', progressStr);
-      if (result) modified = result;
-    }
-  }
+  const projected = runStateMutationTransaction({
+    statePath,
+    cwd,
+    transform: applyPlanAndActivity,
+    acquireStateLock,
+    releaseStateLock,
+    buildStateFrontmatter,
+    normalizeMd,
+    atomicWriteFileSync,
+    extractFrontmatter,
+    stripFrontmatter,
+    reconstructFrontmatter,
+    fs,
+    dryRun: true,
+    mutationSurface: 'full',
+  });
+  const projectedFm = extractFrontmatter(projected);
+  const projectedProgress = projectedFm.progress && typeof projectedFm.progress === 'object' ? projectedFm.progress : {};
+  const percent = Number.isFinite(Number(projectedProgress.percent)) ? Number(projectedProgress.percent) : 0;
 
-  // Sync Last Activity
-  const result = stateReplaceField(modified, 'Last Activity', today);
-  if (result) {
-    const oldActivity = stateExtractField(modified, 'Last Activity');
-    if (oldActivity !== today) {
-      changes.push(`Last Activity: ${oldActivity} -> ${today}`);
+  const finalTransform = (input) => {
+    let modified = input;
+
+    if (highestIncompletePhase) {
+      const currentPlansField = stateExtractField(modified, 'Total Plans in Phase');
+      if (currentPlansField && parseInt(currentPlansField, 10) !== highestIncompletePhaseplanCount) {
+        changes.push(`Total Plans in Phase: ${currentPlansField} -> ${highestIncompletePhaseplanCount}`);
+        const result = stateReplaceField(modified, 'Total Plans in Phase', String(highestIncompletePhaseplanCount));
+        if (result) modified = result;
+      }
     }
-    modified = result;
-  }
+
+    const currentProgress = stateExtractField(modified, 'Progress');
+    if (currentProgress) {
+      const currentPercent = parseInt(currentProgress.replace(/[^\d]/g, ''), 10);
+      if (currentPercent !== percent) {
+        const barWidth = 10;
+        const filled = Math.round(percent / 100 * barWidth);
+        const bar = '\u2588'.repeat(filled) + '\u2591'.repeat(barWidth - filled);
+        const progressStr = `[${bar}] ${percent}%`;
+        changes.push(`Progress: ${currentProgress} -> ${progressStr}`);
+        const result = stateReplaceField(modified, 'Progress', progressStr);
+        if (result) modified = result;
+      }
+    }
+
+    const result = stateReplaceField(modified, 'Last Activity', today);
+    if (result) {
+      const oldActivity = stateExtractField(modified, 'Last Activity');
+      if (oldActivity !== today) {
+        changes.push(`Last Activity: ${oldActivity} -> ${today}`);
+      }
+      modified = result;
+    }
+
+    return modified;
+  };
+
+  runStateMutationTransaction({
+    statePath,
+    cwd,
+    transform: finalTransform,
+    acquireStateLock,
+    releaseStateLock,
+    buildStateFrontmatter,
+    normalizeMd,
+    atomicWriteFileSync,
+    extractFrontmatter,
+    stripFrontmatter,
+    reconstructFrontmatter,
+    fs,
+    dryRun: !!verify,
+    mutationSurface: 'full',
+  });
 
   if (verify) {
     output({ synced: false, changes, dry_run: true }, raw);
     return;
-  }
-
-  if (changes.length > 0 || modified !== content) {
-    writeStateMd(statePath, modified, cwd);
   }
 
   output({ synced: true, changes, dry_run: false }, raw);

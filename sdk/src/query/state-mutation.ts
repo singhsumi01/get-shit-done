@@ -33,7 +33,7 @@ import {
   planningPaths,
   normalizeMd,
 } from './helpers.js';
-import { buildStateFrontmatter, getMilestonePhaseFilter } from './state.js';
+import { buildStateFrontmatter, getMilestonePhaseFilter, scanPhasePlans } from './state.js';
 import { stateExtractField, stateReplaceField, stateReplaceFieldWithFallback } from './state-document.js';
 import { runStateMutationTransaction } from './state-transaction.js';
 import type { QueryHandler } from './utils.js';
@@ -1363,7 +1363,6 @@ export const stateSync: QueryHandler = async (args, projectDir, workstream) => {
     return { data: { error: 'STATE.md not found' } };
   }
 
-  const content = await readFile(statePath, 'utf-8');
   const changes: string[] = [];
   const today = new Date().toISOString().split('T')[0];
 
@@ -1382,25 +1381,61 @@ export const stateSync: QueryHandler = async (args, projectDir, workstream) => {
     return { data: { synced: true, changes: [], dry_run: verify } };
   }
 
-  let totalDiskPlans = 0;
-  let totalDiskSummaries = 0;
   let highestIncompletePhase: string | null = null;
   let highestIncompletePhaseplanCount = 0;
 
   for (const dir of entries) {
     const dirPath = join(phasesDir, dir);
-    const files = readdirSync(dirPath);
-    const plans = files.filter(f => /-PLAN\.md$/i.test(f)).length;
-    const summaries = files.filter(f => /-SUMMARY\.md$/i.test(f)).length;
-    totalDiskPlans += plans;
-    totalDiskSummaries += summaries;
+    const { planCount: plans, summaryCount: summaries } = await scanPhasePlans(dirPath);
 
     const phaseMatch = dir.match(/^(\d+[A-Z]?(?:\.\d+)*)/i);
-    if (phaseMatch && plans > 0 && summaries < plans) {
-      highestIncompletePhase = dir;
-      highestIncompletePhaseplanCount = plans;
+    if (phaseMatch && plans > 0) {
+      if (summaries < plans) {
+        highestIncompletePhase = dir;
+        highestIncompletePhaseplanCount = plans;
+      } else if (!highestIncompletePhase) {
+        highestIncompletePhase = dir;
+        highestIncompletePhaseplanCount = plans;
+      }
     }
   }
+
+  const applyPlanAndActivity = (modified: string): string => {
+    let m = modified;
+    if (highestIncompletePhase) {
+      const currentPlansField = stateExtractField(m, 'Total Plans in Phase');
+      if (currentPlansField && parseInt(currentPlansField, 10) !== highestIncompletePhaseplanCount) {
+        const result = stateReplaceField(m, 'Total Plans in Phase', String(highestIncompletePhaseplanCount));
+        if (result) m = result;
+      }
+    }
+
+    const r = stateReplaceField(m, 'Last Activity', today);
+    if (r) m = r;
+    return m;
+  };
+
+  const projected = await runStateMutationTransaction({
+    statePath,
+    projectDir,
+    workstream,
+    transform: applyPlanAndActivity,
+    acquireStateLock,
+    releaseStateLock,
+    buildStateFrontmatter,
+    normalizeMd,
+    writeFile,
+    extractFrontmatter,
+    stripFrontmatter,
+    reconstructFrontmatter,
+    dryRun: true,
+    mutationSurface: 'body',
+  });
+  const projectedFm = extractFrontmatter(projected);
+  const projectedProgress = projectedFm.progress && typeof projectedFm.progress === 'object'
+    ? projectedFm.progress as Record<string, unknown>
+    : {};
+  const percent = Number.isFinite(Number(projectedProgress.percent)) ? Number(projectedProgress.percent) : 0;
 
   const runModifier = (modified: string): string => {
     let m = modified;
@@ -1413,7 +1448,6 @@ export const stateSync: QueryHandler = async (args, projectDir, workstream) => {
       }
     }
 
-    const percent = totalDiskPlans > 0 ? Math.min(100, Math.round((totalDiskSummaries / totalDiskPlans) * 100)) : 0;
     const currentProgress = stateExtractField(m, 'Progress');
     if (currentProgress) {
       const currentPercent = parseInt(currentProgress.replace(/[^\d]/g, ''), 10);
@@ -1440,8 +1474,22 @@ export const stateSync: QueryHandler = async (args, projectDir, workstream) => {
   };
 
   if (verify) {
-    const body = stripFrontmatter(content);
-    runModifier(body);
+    await runStateMutationTransaction({
+      statePath,
+      projectDir,
+      workstream,
+      transform: runModifier,
+      acquireStateLock,
+      releaseStateLock,
+      buildStateFrontmatter,
+      normalizeMd,
+      writeFile,
+      extractFrontmatter,
+      stripFrontmatter,
+      reconstructFrontmatter,
+      dryRun: true,
+      mutationSurface: 'body',
+    });
     return { data: { synced: false, changes, dry_run: true } };
   }
 

@@ -27,6 +27,7 @@ export interface StateMutationTransactionOptions {
   resync?: boolean;
   preserveExistingProgress?: boolean;
   mutationSurface?: 'full' | 'body';
+  dryRun?: boolean;
 }
 
 export async function runStateMutationTransaction(options: StateMutationTransactionOptions): Promise<string> {
@@ -46,6 +47,7 @@ export async function runStateMutationTransaction(options: StateMutationTransact
     resync = true,
     preserveExistingProgress,
     mutationSurface = 'body',
+    dryRun = false,
   } = options;
 
   const lockPath = await acquireStateLock(statePath);
@@ -73,7 +75,9 @@ export async function runStateMutationTransaction(options: StateMutationTransact
     const yamlStr = reconstructFrontmatter(projectedFm);
     const synced = `---\n${yamlStr}\n---\n\n${body}`;
     const normalized = normalizeMd(synced);
-    await writeFile(statePath, normalized, 'utf-8');
+    if (!dryRun) {
+      await writeFile(statePath, normalized, 'utf-8');
+    }
     return normalized;
   } finally {
     await releaseStateLock(lockPath);

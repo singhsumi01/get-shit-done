@@ -24,6 +24,7 @@ function runStateMutationTransaction(options) {
     resync = true,
     preserveExistingProgress = false,
     mutationSurface = 'full',
+    dryRun = false,
   } = options;
 
   const lockPath = acquireStateLock(statePath);
@@ -51,7 +52,9 @@ function runStateMutationTransaction(options) {
     const yamlStr = reconstructFrontmatter(projectedFm);
     const synced = `---\n${yamlStr}\n---\n\n${body}`;
     const normalized = normalizeMd(synced);
-    atomicWriteFileSync(statePath, normalized, 'utf-8');
+    if (!dryRun) {
+      atomicWriteFileSync(statePath, normalized, 'utf-8');
+    }
     return normalized;
   } finally {
     releaseStateLock(lockPath);

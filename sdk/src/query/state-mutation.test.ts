@@ -1150,3 +1150,75 @@ Last activity: 2026-04-20 -- v1.0 shipped
     expect(data.error).toBeDefined();
   });
 });
+
+describe('stateSync', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'gsd-sdk-state-sync-'));
+    await setupTestProject(tmpDir, [
+      '# Project State',
+      '',
+      'Status: Executing Phase 2',
+      'Current Phase: 02',
+      'Total Plans in Phase: 0',
+      'Current Plan: 1',
+      'Progress: 0%',
+      'Last Activity: 2026-04-01',
+      '',
+    ].join('\n'));
+    await writeFile(
+      join(tmpDir, '.planning', 'ROADMAP.md'),
+      '# Roadmap\n\n## Current Milestone: v3.0 SDK-First Migration\n\n### Phase 02: Core\n\nGoal: Build core.\n\n### Phase 03: Follow-up\n\nGoal: Continue.\n',
+      'utf-8',
+    );
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('updates nested plan layout counts and projection-backed progress', async () => {
+    const phaseDir = join(tmpDir, '.planning', 'phases', '02-core', 'plans');
+    await mkdir(phaseDir, { recursive: true });
+    await writeFile(join(phaseDir, 'PLAN-01-build.md'), '# Plan\n', 'utf-8');
+    await writeFile(join(phaseDir, 'PLAN-02-test.md'), '# Plan\n', 'utf-8');
+    await writeFile(join(phaseDir, 'SUMMARY-01-build.md'), '# Summary\n', 'utf-8');
+    await writeFile(join(phaseDir, 'SUMMARY-02-test.md'), '# Summary\n', 'utf-8');
+
+    const { stateSync } = await import('./state-mutation.js');
+    const result = await stateSync([], tmpDir);
+    const data = result.data as Record<string, unknown>;
+    expect(data.synced).toBe(true);
+
+    const after = await readFile(join(tmpDir, '.planning', 'STATE.md'), 'utf-8');
+    expect(after).toContain('Total Plans in Phase: 2');
+    expect(after).toContain('Progress: [█████░░░░░] 50%');
+    const fm = extractFrontmatter(after);
+    const progress = fm.progress as Record<string, unknown>;
+    expect(Number(progress.total_plans)).toBe(2);
+    expect(Number(progress.completed_plans)).toBe(2);
+    expect(Number(progress.percent)).toBe(50);
+  });
+
+  it('--verify reports nested layout drift without writing', async () => {
+    const phaseDir = join(tmpDir, '.planning', 'phases', '02-core', 'plans');
+    await mkdir(phaseDir, { recursive: true });
+    await writeFile(join(phaseDir, 'PLAN-01-build.md'), '# Plan\n', 'utf-8');
+    await writeFile(join(phaseDir, 'PLAN-02-test.md'), '# Plan\n', 'utf-8');
+    await writeFile(join(phaseDir, 'SUMMARY-01-build.md'), '# Summary\n', 'utf-8');
+    await writeFile(join(phaseDir, 'SUMMARY-02-test.md'), '# Summary\n', 'utf-8');
+    const statePath = join(tmpDir, '.planning', 'STATE.md');
+    const before = await readFile(statePath, 'utf-8');
+
+    const { stateSync } = await import('./state-mutation.js');
+    const result = await stateSync(['--verify'], tmpDir);
+    const data = result.data as Record<string, unknown>;
+    expect(data.dry_run).toBe(true);
+    expect(data.changes).toEqual(expect.arrayContaining([
+      'Total Plans in Phase: 0 -> 2',
+      'Progress: 0% -> [█████░░░░░] 50%',
+    ]));
+    await expect(readFile(statePath, 'utf-8')).resolves.toBe(before);
+  });
+});

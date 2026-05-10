@@ -36,6 +36,58 @@ import type { QueryHandler } from './utils.js';
 
 // ─── Internal helpers ──────────────────────────────────────────────────────
 
+const PLAN_OUTLINE_RE = /-OUTLINE\.md$/i;
+const PLAN_PRE_BOUNCE_RE = /\.pre-bounce\.md$/i;
+
+function isRootPlanFile(file: string): boolean {
+  if (PLAN_OUTLINE_RE.test(file)) return false;
+  if (PLAN_PRE_BOUNCE_RE.test(file)) return false;
+  if (file.endsWith('-PLAN.md') || file === 'PLAN.md') return true;
+  return /\.md$/i.test(file) && /PLAN/i.test(file);
+}
+
+function isNestedPlanFile(file: string): boolean {
+  if (PLAN_OUTLINE_RE.test(file)) return false;
+  if (PLAN_PRE_BOUNCE_RE.test(file)) return false;
+  return /^PLAN-\d+.*\.md$/i.test(file) || /-PLAN-\d+.*\.md$/i.test(file);
+}
+
+function isRootSummaryFile(file: string): boolean {
+  return file.endsWith('-SUMMARY.md') || file === 'SUMMARY.md';
+}
+
+function isNestedSummaryFile(file: string): boolean {
+  return /^SUMMARY-\d+.*\.md$/i.test(file) || /-SUMMARY-\d+.*\.md$/i.test(file);
+}
+
+export async function scanPhasePlans(phaseDir: string): Promise<{ planCount: number; summaryCount: number; completed: boolean }> {
+  let rootFiles: string[];
+  try {
+    rootFiles = await readdir(phaseDir);
+  } catch {
+    return { planCount: 0, summaryCount: 0, completed: false };
+  }
+
+  const rootPlanFiles = rootFiles.filter(isRootPlanFile);
+  const rootSummaryFiles = rootFiles.filter(isRootSummaryFile);
+
+  let nestedPlanFiles: string[] = [];
+  let nestedSummaryFiles: string[] = [];
+  try {
+    const nestedFiles = await readdir(join(phaseDir, 'plans'));
+    nestedPlanFiles = nestedFiles.filter(isNestedPlanFile);
+    nestedSummaryFiles = nestedFiles.filter(isNestedSummaryFile);
+  } catch { /* no nested plans directory */ }
+
+  const planCount = rootPlanFiles.length + nestedPlanFiles.length;
+  const summaryCount = rootSummaryFiles.length + nestedSummaryFiles.length;
+  return {
+    planCount,
+    summaryCount,
+    completed: planCount > 0 && summaryCount >= planCount,
+  };
+}
+
 /**
  * Build a filter function that checks if a phase directory belongs to the current milestone.
  *
@@ -127,12 +179,10 @@ export async function buildStateFrontmatter(
     let diskCompletedPhases = 0;
 
     for (const dir of phaseDirs) {
-      const files = await readdir(join(phasesDir, dir));
-      const plans = files.filter(f => /-PLAN\.md$/i.test(f)).length;
-      const summaries = files.filter(f => /-SUMMARY\.md$/i.test(f)).length;
-      diskTotalPlans += plans;
-      diskTotalSummaries += summaries;
-      if (plans > 0 && summaries >= plans) diskCompletedPhases++;
+      const { planCount, summaryCount, completed } = await scanPhasePlans(join(phasesDir, dir));
+      diskTotalPlans += planCount;
+      diskTotalSummaries += summaryCount;
+      if (completed) diskCompletedPhases++;
     }
 
     totalPhases = isDirInMilestone.phaseCount > 0
