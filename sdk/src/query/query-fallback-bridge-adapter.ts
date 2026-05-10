@@ -1,5 +1,4 @@
-import { execFile } from 'node:child_process';
-import { classifyFallbackOutput } from './query-fallback-output-classifier.js';
+import { runLegacyGsdTools } from '../sdk-package-compatibility.js';
 
 export interface FallbackBridgeRunInput {
   projectDir: string;
@@ -15,40 +14,21 @@ export interface FallbackBridgeOutput {
   stderr: string;
 }
 
-function dottedCommandToCjsArgv(normCmd: string, normArgs: string[]): string[] {
-  if (normCmd.includes('.')) return [...normCmd.split('.'), ...normArgs];
-  return [normCmd, ...normArgs];
-}
-
-function execBridge(input: FallbackBridgeRunInput): Promise<{ stdout: string; stderr: string }> {
-  const cjsArgv = dottedCommandToCjsArgv(input.normCmd, input.normArgs);
-  const wsSuffix = input.ws ? ['--ws', input.ws] : [];
-  const fullArgv = [input.gsdToolsPath, ...cjsArgv, ...wsSuffix];
-
-  return new Promise((resolve, reject) => {
-    execFile(
-      process.execPath,
-      fullArgv,
-      { cwd: input.projectDir, maxBuffer: 10 * 1024 * 1024, timeout: 30_000, killSignal: 'SIGKILL', env: { ...process.env } },
-      (err, stdout, stderr) => {
-        const stdoutText = stdout?.toString() ?? '';
-        const stderrText = stderr?.toString() ?? '';
-        if (err) {
-          if (stderrText.trim()) {
-            reject(new Error(`${err.message}\n${stderrText.trimEnd()}`));
-            return;
-          }
-          reject(err);
-          return;
-        }
-        resolve({ stdout: stdoutText, stderr: stderrText });
-      },
-    );
-  });
-}
-
 export async function runFallbackBridge(input: FallbackBridgeRunInput): Promise<FallbackBridgeOutput> {
-  const { stdout, stderr } = await execBridge(input);
-  const classified = await classifyFallbackOutput(stdout, input.projectDir);
-  return { ...classified, stderr };
+  const result = await runLegacyGsdTools({
+    projectDir: input.projectDir,
+    gsdToolsPath: input.gsdToolsPath,
+    command: input.normCmd,
+    args: input.normArgs,
+    workstream: input.ws,
+    mode: 'auto',
+  });
+
+  if (!result.ok) {
+    throw new Error(result.stderr.trim() ? `${result.message}\n${result.stderr.trimEnd()}` : result.message);
+  }
+
+  return result.mode === 'json'
+    ? { mode: 'json', output: result.data, stderr: result.stderr }
+    : { mode: 'text', output: result.text, stderr: result.stderr };
 }

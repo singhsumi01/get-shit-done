@@ -1,7 +1,9 @@
 import { existsSync } from 'node:fs';
+import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { GSDError, ErrorClassification } from './errors.js';
 
@@ -18,6 +20,35 @@ interface LegacySdkCompatibilityDeps {
   existsSync?: (path: string) => boolean;
   homeDir?: string;
   createRequire?: typeof createRequire;
+}
+
+export type LegacyGsdToolsFailureReason =
+  | 'missing_asset'
+  | 'spawn_failed'
+  | 'timeout'
+  | 'nonzero_exit'
+  | 'parse_failed';
+
+export type LegacyGsdToolsResult =
+  | { ok: true; mode: 'json'; data: unknown; stderr: string }
+  | { ok: true; mode: 'text'; text: string; stderr: string }
+  | {
+      ok: false;
+      reason: LegacyGsdToolsFailureReason;
+      message: string;
+      stderr: string;
+      exitCode: number | null;
+    };
+
+export interface LegacyGsdToolsRunInput {
+  projectDir: string;
+  command: string;
+  args?: string[];
+  workstream?: string;
+  mode?: 'json' | 'text' | 'auto';
+  timeoutMs?: number;
+  gsdToolsPath?: string;
+  deps?: LegacySdkCompatibilityDeps;
 }
 
 export const BUNDLED_GSD_TOOLS_PATH = fileURLToPath(
@@ -103,6 +134,149 @@ export function probeLegacySdkAsset(
 export function resolveGsdToolsPath(projectDir: string, deps: LegacySdkCompatibilityDeps = {}): string {
   const resolution = probeLegacySdkAsset('gsd-tools', projectDir, deps);
   return resolution.path ?? resolution.fallbackPath;
+}
+
+function missingLegacyGsdToolsResult(resolution: LegacySdkAssetResolution): LegacyGsdToolsResult {
+  return {
+    ok: false,
+    reason: 'missing_asset',
+    message: [
+      'get-shit-done/bin/gsd-tools.cjs not found.',
+      `Checked: ${resolution.probes.join(', ')}`,
+      'Install GSD (e.g. npm i -g get-shit-done-cc) or clone with get-shit-done next to the SDK.',
+    ].join(' '),
+    stderr: '',
+    exitCode: null,
+  };
+}
+
+function cjsCommandArgs(command: string, args: string[], workstream?: string): string[] {
+  const commandArgs = command.includes('.') ? command.split('.') : command.trim().split(/\s+/).filter(Boolean);
+  const wsArgs = workstream ? ['--ws', workstream] : [];
+  return [...commandArgs, ...args, ...wsArgs];
+}
+
+async function parseLegacyJsonOutput(raw: string, projectDir: string): Promise<unknown> {
+  const trimmed = raw.trim();
+  if (trimmed === '') return null;
+  let jsonStr = trimmed;
+  if (jsonStr.startsWith('@file:')) {
+    const filePath = jsonStr.slice(6).trim();
+    const resolvedPath = isAbsolute(filePath) ? filePath : resolve(projectDir, filePath);
+    jsonStr = await readFile(resolvedPath, 'utf-8');
+  }
+  return JSON.parse(jsonStr);
+}
+
+async function projectLegacyOutput(
+  stdout: string,
+  stderr: string,
+  projectDir: string,
+  mode: 'json' | 'text' | 'auto',
+): Promise<LegacyGsdToolsResult> {
+  if (mode === 'text') {
+    return { ok: true, mode: 'text', text: stdout.trim(), stderr };
+  }
+
+  if (mode === 'json') {
+    try {
+      return { ok: true, mode: 'json', data: await parseLegacyJsonOutput(stdout, projectDir), stderr };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return {
+        ok: false,
+        reason: 'parse_failed',
+        message: `Failed to parse gsd-tools JSON output: ${reason}\nRaw output: ${stdout.slice(0, 500)}`,
+        stderr,
+        exitCode: 0,
+      };
+    }
+  }
+
+  if (stdout.trim() === '') {
+    return { ok: true, mode: 'text', text: stdout, stderr };
+  }
+
+  try {
+    return { ok: true, mode: 'json', data: await parseLegacyJsonOutput(stdout, projectDir), stderr };
+  } catch {
+    return { ok: true, mode: 'text', text: stdout, stderr };
+  }
+}
+
+/**
+ * Run legacy `gsd-tools.cjs` through the SDK Package Seam Module.
+ *
+ * Callers receive a policy-shaped result and retain ownership of domain-specific
+ * fallback contracts, such as non-blocking verification skips.
+ */
+export async function runLegacyGsdTools(input: LegacyGsdToolsRunInput): Promise<LegacyGsdToolsResult> {
+  const args = input.args ?? [];
+  const mode = input.mode ?? 'json';
+  const timeoutMs = input.timeoutMs ?? 30_000;
+  const resolution = input.gsdToolsPath
+    ? null
+    : probeLegacySdkAsset('gsd-tools', input.projectDir, input.deps);
+  const gsdToolsPath = input.gsdToolsPath ?? resolution?.path ?? null;
+
+  if (!gsdToolsPath) {
+    return missingLegacyGsdToolsResult(resolution!);
+  }
+
+  const fullArgs = [gsdToolsPath, ...cjsCommandArgs(input.command, args, input.workstream)];
+
+  return new Promise<LegacyGsdToolsResult>((resolveResult) => {
+    const child = execFile(
+      process.execPath,
+      fullArgs,
+      {
+        cwd: input.projectDir,
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: timeoutMs,
+        killSignal: 'SIGKILL',
+        env: { ...process.env },
+      },
+      async (error, stdout, stderr) => {
+        const stdoutText = stdout?.toString() ?? '';
+        const stderrText = stderr?.toString() ?? '';
+
+        if (error) {
+          const err = error as Error & { code?: unknown; status?: number | null; signal?: NodeJS.Signals | null; killed?: boolean };
+          if (err.killed || err.signal === 'SIGKILL' || err.code === 'ETIMEDOUT') {
+            resolveResult({
+              ok: false,
+              reason: 'timeout',
+              message: `gsd-tools timed out after ${timeoutMs}ms: ${input.command} ${args.join(' ')}`.trim(),
+              stderr: stderrText,
+              exitCode: null,
+            });
+            return;
+          }
+
+          resolveResult({
+            ok: false,
+            reason: 'nonzero_exit',
+            message: `gsd-tools exited with code ${err.code ?? err.status ?? 'unknown'}: ${input.command} ${args.join(' ')}`.trim(),
+            stderr: stderrText,
+            exitCode: typeof err.code === 'number' ? err.code : err.status ?? 1,
+          });
+          return;
+        }
+
+        resolveResult(await projectLegacyOutput(stdoutText, stderrText, input.projectDir, mode));
+      },
+    );
+
+    child.on('error', (err) => {
+      resolveResult({
+        ok: false,
+        reason: 'spawn_failed',
+        message: `Failed to execute gsd-tools: ${err.message}`,
+        stderr: '',
+        exitCode: null,
+      });
+    });
+  });
 }
 
 function missingLegacyCoreMessage(resolution: LegacySdkAssetResolution): string {

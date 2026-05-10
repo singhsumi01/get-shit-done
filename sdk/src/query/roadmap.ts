@@ -21,7 +21,7 @@ import { existsSync } from 'node:fs';
 import { readFile, writeFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { GSDError, ErrorClassification } from '../errors.js';
-import { resolveGsdToolsPath } from '../sdk-package-compatibility.js';
+import { runLegacyGsdTools } from '../sdk-package-compatibility.js';
 import {
   escapeRegex,
   normalizePhaseName,
@@ -737,30 +737,17 @@ export const roadmapAnnotateDependencies: QueryHandler = async (args, projectDir
     return { data: { updated: false, reason: 'phase argument required' } };
   }
 
-  const { spawnSync } = await import('node:child_process');
-  const toolsPath = resolveGsdToolsPath(projectDir);
-
-  const result = spawnSync(process.execPath, [toolsPath, 'roadmap', 'annotate-dependencies', phase], {
-    cwd: projectDir,
-    encoding: 'utf-8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-    timeout: 15000,
-    maxBuffer: 1024 * 1024,
+  const result = await runLegacyGsdTools({
+    projectDir,
+    command: 'roadmap',
+    args: ['annotate-dependencies', phase],
+    mode: 'json',
+    timeoutMs: 15000,
   });
 
-  if (result.error) {
-    return { data: { updated: false, reason: result.error.message || 'gsd-tools invocation failed' } };
-  }
-
-  if (result.status !== 0) {
-    return { data: { updated: false, reason: result.stderr?.trim() || 'gsd-tools error' } };
-  }
-
-  try {
-    return { data: JSON.parse(result.stdout.trim()) };
-  } catch {
-    return { data: { updated: false, reason: 'failed to parse gsd-tools output' } };
-  }
+  if (result.ok && result.mode === 'json') return { data: result.data };
+  if (result.ok) return { data: { updated: false, reason: 'failed to parse gsd-tools output' } };
+  return { data: { updated: false, reason: result.stderr.trim() || result.message } };
 };
 
 

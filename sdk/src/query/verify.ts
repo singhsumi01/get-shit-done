@@ -26,7 +26,7 @@ import {
   planningPaths,
 } from './helpers.js';
 import type { QueryHandler } from './utils.js';
-import { resolveGsdToolsPath } from '../sdk-package-compatibility.js';
+import { runLegacyGsdTools } from '../sdk-package-compatibility.js';
 
 // ─── verifyPlanStructure ───────────────────────────────────────────────────
 
@@ -657,36 +657,36 @@ export const verifySchemaDrift: QueryHandler = async (args, projectDir, workstre
  * canonical place (see `cmdVerifyCodebaseDrift`).
  */
 export const verifyCodebaseDrift: QueryHandler = async (_args, projectDir) => {
-  try {
-    const { execFileSync } = await import('node:child_process');
-    const toolsPath = resolveGsdToolsPath(projectDir);
-    const out = execFileSync(process.execPath, [toolsPath, 'verify', 'codebase-drift'], {
-      cwd: projectDir,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-    try {
-      return { data: JSON.parse(out) };
-    } catch {
-      return {
-        data: {
-          skipped: true,
-          reason: 'sdk-parse-failed',
-          action_required: false,
-          directive: 'none',
-          elements: [],
-        },
-      };
-    }
-  } catch (err) {
+  const result = await runLegacyGsdTools({
+    projectDir,
+    command: 'verify',
+    args: ['codebase-drift'],
+    mode: 'json',
+  });
+
+  if (result.ok && result.mode === 'json') {
+    return { data: result.data };
+  }
+
+  if (result.ok) {
     return {
       data: {
         skipped: true,
-        reason: 'sdk-exception: ' + (err instanceof Error ? err.message : String(err)),
+        reason: 'sdk-parse-failed',
         action_required: false,
         directive: 'none',
         elements: [],
       },
     };
   }
+
+  return {
+    data: {
+      skipped: true,
+      reason: `sdk-${result.reason}: ${result.message}`,
+      action_required: false,
+      directive: 'none',
+      elements: [],
+    },
+  };
 };

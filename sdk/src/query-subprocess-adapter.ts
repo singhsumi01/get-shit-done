@@ -1,8 +1,6 @@
-import { execFile } from 'node:child_process';
-import { isAbsolute, resolve } from 'node:path';
-import { readFile } from 'node:fs/promises';
 import { timeoutMessage } from './query-failure-classification.js';
 import type { QueryToolsErrorFactory } from './query-tools-error-factory.js';
+import { runLegacyGsdTools, type LegacyGsdToolsResult } from './sdk-package-compatibility.js';
 
 export interface QuerySubprocessAdapterDeps extends QueryToolsErrorFactory {
   projectDir: string;
@@ -15,132 +13,58 @@ export class QuerySubprocessAdapter {
   constructor(private readonly deps: QuerySubprocessAdapterDeps) {}
 
   async execJson(command: string, args: string[]): Promise<unknown> {
-    const fullArgs = this.commandArgs(command, args);
-
-    return new Promise<unknown>((resolve, reject) => {
-      const child = execFile(
-        process.execPath,
-        fullArgs,
-        {
-          cwd: this.deps.projectDir,
-          maxBuffer: 10 * 1024 * 1024,
-          timeout: this.deps.timeoutMs,
-          env: { ...process.env },
-        },
-        async (error, stdout, stderr) => {
-          const stderrStr = stderr?.toString() ?? '';
-
-          if (error) {
-            reject(this.processExecutionError(command, args, error, stderrStr));
-            return;
-          }
-
-          const raw = stdout?.toString() ?? '';
-          try {
-            const parsed = await this.parseOutput(raw);
-            resolve(parsed);
-          } catch (parseErr) {
-            reject(
-              this.deps.createFailureError(
-                `Failed to parse gsd-tools output for "${command}": ${parseErr instanceof Error ? parseErr.message : String(parseErr)}\nRaw output: ${raw.slice(0, 500)}`,
-                command,
-                args,
-                0,
-                stderrStr,
-              ),
-            );
-          }
-        },
-      );
-
-      child.on('error', (err) => {
-        reject(this.processSpawnError(command, args, err));
-      });
+    const result = await runLegacyGsdTools({
+      projectDir: this.deps.projectDir,
+      gsdToolsPath: this.deps.gsdToolsPath,
+      timeoutMs: this.deps.timeoutMs,
+      workstream: this.deps.workstream,
+      command,
+      args,
+      mode: 'json',
     });
+    if (result.ok && result.mode === 'json') return result.data;
+    throw this.processLegacyFailure(command, args, result);
   }
 
   async execRaw(command: string, args: string[]): Promise<string> {
-    const fullArgs = [...this.commandArgs(command, args), '--raw'];
-
-    return new Promise<string>((resolve, reject) => {
-      const child = execFile(
-        process.execPath,
-        fullArgs,
-        {
-          cwd: this.deps.projectDir,
-          maxBuffer: 10 * 1024 * 1024,
-          timeout: this.deps.timeoutMs,
-          env: { ...process.env },
-        },
-        (error, stdout, stderr) => {
-          const stderrStr = stderr?.toString() ?? '';
-          if (error) {
-            reject(this.processExecutionError(command, args, error, stderrStr));
-            return;
-          }
-          resolve((stdout?.toString() ?? '').trim());
-        },
-      );
-
-      child.on('error', (err) => {
-        reject(this.processSpawnError(command, args, err));
-      });
+    const result = await runLegacyGsdTools({
+      projectDir: this.deps.projectDir,
+      gsdToolsPath: this.deps.gsdToolsPath,
+      timeoutMs: this.deps.timeoutMs,
+      workstream: this.deps.workstream,
+      command,
+      args: [...args, '--raw'],
+      mode: 'text',
     });
+    if (result.ok && result.mode === 'text') return result.text;
+    throw this.processLegacyFailure(command, args, result);
   }
 
-  private commandArgs(command: string, args: string[]): string[] {
-    const wsArgs = this.deps.workstream ? ['--ws', this.deps.workstream] : [];
-    return [this.deps.gsdToolsPath, command, ...args, ...wsArgs];
-  }
-
-  private processExecutionError(
+  private processLegacyFailure(
     command: string,
     args: string[],
-    error: Error & { code?: unknown; status?: number; killed?: boolean },
-    stderrStr: string,
+    result: LegacyGsdToolsResult,
   ) {
-    if (error.killed || (error as NodeJS.ErrnoException).code === 'ETIMEDOUT') {
+    if (result.ok) {
+      return this.deps.createFailureError(`Unexpected gsd-tools output mode for "${command}"`, command, args, 0, result.stderr);
+    }
+
+    if (result.reason === 'timeout') {
       return this.deps.createTimeoutError(
         timeoutMessage(command, args, this.deps.timeoutMs),
         command,
         args,
-        stderrStr,
+        result.stderr,
         this.deps.timeoutMs,
       );
     }
 
     return this.deps.createFailureError(
-      `gsd-tools exited with code ${error.code ?? 'unknown'}: ${command} ${args.join(' ')}${stderrStr ? `\n${stderrStr}` : ''}`,
+      result.stderr ? `${result.message}\n${result.stderr}` : result.message,
       command,
       args,
-      typeof error.code === 'number' ? error.code : error.status ?? 1,
-      stderrStr,
+      result.exitCode,
+      result.stderr,
     );
-  }
-
-  private processSpawnError(command: string, args: string[], err: Error) {
-    return this.deps.createFailureError(`Failed to execute gsd-tools: ${err.message}`, command, args, null, '');
-  }
-
-  private async parseOutput(raw: string): Promise<unknown> {
-    const trimmed = raw.trim();
-
-    if (trimmed === '') {
-      return null;
-    }
-
-    let jsonStr = trimmed;
-    if (jsonStr.startsWith('@file:')) {
-      const filePath = jsonStr.slice(6).trim();
-      const resolvedPath = isAbsolute(filePath) ? filePath : resolve(this.deps.projectDir, filePath);
-      try {
-        jsonStr = await readFile(resolvedPath, 'utf-8');
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        throw new Error(`Failed to read gsd-tools @file: indirection at "${resolvedPath}": ${reason}`);
-      }
-    }
-
-    return JSON.parse(jsonStr);
   }
 }
