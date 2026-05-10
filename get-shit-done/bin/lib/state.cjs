@@ -896,24 +896,6 @@ function stripFrontmatter(content) {
   return result;
 }
 
-function syncStateFrontmatter(content, cwd) {
-  // Read existing frontmatter BEFORE stripping — it may contain values
-  // that the body no longer has (e.g., Status field removed by an agent).
-  const existingFm = extractFrontmatter(content);
-  const body = stripFrontmatter(content);
-  const derivedFm = buildStateFrontmatter(body, cwd);
-
-  // Preserve existing frontmatter status when body-derived status is 'unknown'.
-  // This prevents a missing Status: field in the body from overwriting a
-  // previously valid status (e.g., 'executing' → 'unknown').
-  if (derivedFm.status === 'unknown' && existingFm.status && existingFm.status !== 'unknown') {
-    derivedFm.status = existingFm.status;
-  }
-
-  const yamlStr = reconstructFrontmatter(derivedFm);
-  return `---\n${yamlStr}\n---\n\n${body}`;
-}
-
 /**
  * Acquire a lockfile for STATE.md operations.
  * Returns the lock path for later release.
@@ -972,13 +954,22 @@ function writeStateMd(statePath, content, cwd) {
   // may create new PLAN/SUMMARY files that buildStateFrontmatter must see.
   // Safe for any calling pattern, not just short-lived CLI processes (#1967).
   if (cwd) _diskScanCache.delete(cwd);
-  const synced = syncStateFrontmatter(content, cwd);
-  const lockPath = acquireStateLock(statePath);
-  try {
-    atomicWriteFileSync(statePath, normalizeMd(synced), 'utf-8');
-  } finally {
-    releaseStateLock(lockPath);
-  }
+  return runStateMutationTransaction({
+    statePath,
+    cwd,
+    transform: () => content,
+    acquireStateLock,
+    releaseStateLock,
+    buildStateFrontmatter,
+    normalizeMd,
+    atomicWriteFileSync,
+    extractFrontmatter,
+    stripFrontmatter,
+    reconstructFrontmatter,
+    fs,
+    preserveExistingProgress: true,
+    mutationSurface: 'full',
+  });
 }
 
 /**
@@ -995,9 +986,8 @@ function writeStateMd(statePath, content, cwd) {
  *   the transform. Pass { resync: false } for body-only updates (e.g. state.update
  *   on a single field) that must not trample manually-curated cross-milestone
  *   progress.* counters in the frontmatter (#3242 Bug A).
- *   When resync is false, syncStateFrontmatter still runs to maintain/create the
- *   frontmatter block, but any existing progress.* sub-keys are preserved from
- *   the pre-transform file rather than being rebuilt from disk.
+ *   When resync is false, the transaction still rebuilds frontmatter but
+ *   preserves existing progress.* sub-keys from the pre-transform file.
  */
 function readModifyWriteStateMd(statePath, transformFn, cwd, options) {
   return runStateMutationTransaction({
@@ -1006,7 +996,7 @@ function readModifyWriteStateMd(statePath, transformFn, cwd, options) {
     transform: transformFn,
     acquireStateLock,
     releaseStateLock,
-    syncStateFrontmatter,
+    buildStateFrontmatter,
     normalizeMd,
     atomicWriteFileSync,
     extractFrontmatter,
@@ -1014,6 +1004,7 @@ function readModifyWriteStateMd(statePath, transformFn, cwd, options) {
     reconstructFrontmatter,
     fs,
     resync: !options || options.resync !== false,
+    preserveExistingProgress: false,
     mutationSurface: 'full',
   });
 }
@@ -1041,7 +1032,7 @@ function cmdStateJson(cwd, raw) {
   if (existingFm && existingFm.paused_at && !built.paused_at) {
     built.paused_at = existingFm.paused_at;
   }
-  // Preserve existing status when body-derived status is 'unknown' (same logic as syncStateFrontmatter).
+  // Preserve existing status when body-derived status is 'unknown' (same logic as transaction writes).
   if (built.status === 'unknown' && existingFm && existingFm.status && existingFm.status !== 'unknown') {
     built.status = existingFm.status;
   }

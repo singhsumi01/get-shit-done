@@ -14,12 +14,11 @@ export interface StateMutationTransactionOptions {
   transform: (content: string) => string | Promise<string>;
   acquireStateLock: (statePath: string) => Promise<string>;
   releaseStateLock: (lockPath: string) => Promise<void>;
-  syncStateFrontmatter: (
-    content: string,
+  buildStateFrontmatter: (
+    body: string,
     projectDir: string,
     workstream?: string,
-    options?: { preserveExistingProgress?: boolean },
-  ) => Promise<string>;
+  ) => Promise<Record<string, unknown>>;
   normalizeMd: (content: string) => string;
   writeFile: (path: string, content: string, encoding: BufferEncoding) => Promise<void>;
   extractFrontmatter: (content: string) => Record<string, unknown>;
@@ -38,7 +37,7 @@ export async function runStateMutationTransaction(options: StateMutationTransact
     transform,
     acquireStateLock,
     releaseStateLock,
-    syncStateFrontmatter,
+    buildStateFrontmatter,
     normalizeMd,
     writeFile,
     extractFrontmatter,
@@ -52,24 +51,53 @@ export async function runStateMutationTransaction(options: StateMutationTransact
   const lockPath = await acquireStateLock(statePath);
   try {
     const content = existsSync(statePath) ? readFileSync(statePath, 'utf-8') : '';
-    const preFm = !resync ? extractFrontmatter(content) : null;
+    const originalFm = extractFrontmatter(content);
+    const preFm = !resync ? originalFm : null;
     const mutationInput = mutationSurface === 'body' ? stripFrontmatter(content) : content;
     const modified = await transform(mutationInput);
-    let synced = await syncStateFrontmatter(modified, projectDir, workstream, {
-      preserveExistingProgress,
-    });
+    const modifiedFm = extractFrontmatter(modified);
+    const existingFm = Object.keys(modifiedFm).length > 0 ? modifiedFm : originalFm;
+    const body = stripFrontmatter(modified);
+    const projectedFm = await buildStateFrontmatter(body, projectDir, workstream);
 
-    if (!resync && preFm && preFm.progress) {
-      const postFm = extractFrontmatter(synced);
-      postFm.progress = preFm.progress;
-      const yamlStr = reconstructFrontmatter(postFm);
-      synced = `---\n${yamlStr}\n---\n\n${stripFrontmatter(synced)}`;
+    if (projectedFm.status === 'unknown' && existingFm.status && existingFm.status !== 'unknown') {
+      projectedFm.status = existingFm.status;
     }
 
+    if (!resync && preFm && preFm.progress) {
+      projectedFm.progress = preFm.progress;
+    } else if (preserveExistingProgress !== false && shouldPreserveExistingProgress(existingFm.progress, projectedFm.progress)) {
+      projectedFm.progress = normalizeProgressNumbers(existingFm.progress);
+    }
+
+    const yamlStr = reconstructFrontmatter(projectedFm);
+    const synced = `---\n${yamlStr}\n---\n\n${body}`;
     const normalized = normalizeMd(synced);
     await writeFile(statePath, normalized, 'utf-8');
     return normalized;
   } finally {
     await releaseStateLock(lockPath);
   }
+}
+
+function normalizeProgressNumbers(progress: unknown): unknown {
+  if (!progress || typeof progress !== 'object' || Array.isArray(progress)) return progress;
+  const normalized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(progress)) {
+    const numeric = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+    normalized[key] = typeof numeric === 'number' && Number.isFinite(numeric) ? numeric : value;
+  }
+  return normalized;
+}
+
+function shouldPreserveExistingProgress(existingProgress: unknown, projectedProgress: unknown): boolean {
+  if (!existingProgress || typeof existingProgress !== 'object' || Array.isArray(existingProgress)) return false;
+  const projected = projectedProgress && typeof projectedProgress === 'object' && !Array.isArray(projectedProgress)
+    ? projectedProgress as Record<string, unknown>
+    : {};
+  const existing = existingProgress as Record<string, unknown>;
+  const projectedTotalPlans = Number(projected.total_plans ?? 0);
+  const projectedCompletedPlans = Number(projected.completed_plans ?? 0);
+  const existingTotalPlans = Number(existing.total_plans ?? 0);
+  return projectedTotalPlans === 0 && projectedCompletedPlans === 0 && existingTotalPlans > 0;
 }

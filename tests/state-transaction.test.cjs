@@ -79,7 +79,7 @@ describe('STATE.md Mutation Transaction Module', () => {
         return `${p}.lock`;
       },
       releaseStateLock: (p) => fs.rmSync(p, { force: true }),
-      syncStateFrontmatter: (content) => `---\nstatus: completed\n---\n\n${stripFrontmatter(content)}`,
+      buildStateFrontmatter: () => ({ status: 'completed' }),
       normalizeMd: (content) => content,
       atomicWriteFileSync: fs.writeFileSync,
       extractFrontmatter,
@@ -121,7 +121,13 @@ describe('STATE.md Mutation Transaction Module', () => {
       transform: (body) => body.replace('Status: Executing', 'Status: Ready'),
       acquireStateLock: (p) => `${p}.lock`,
       releaseStateLock: () => {},
-      syncStateFrontmatter: (content) => `---\nstatus: ready\nprogress:\n  total_plans: 1\n  completed_plans: 1\n---\n\n${content}`,
+      buildStateFrontmatter: () => ({
+        status: 'ready',
+        progress: {
+          total_plans: 1,
+          completed_plans: 1,
+        },
+      }),
       normalizeMd: (content) => content,
       atomicWriteFileSync: fs.writeFileSync,
       extractFrontmatter,
@@ -136,5 +142,44 @@ describe('STATE.md Mutation Transaction Module', () => {
     assert.match(after, /total_plans: 12/);
     assert.match(after, /completed_plans: 6/);
     assert.match(after, /Status: Ready/);
+  });
+
+  test('preserves existing frontmatter status when projected status is unknown', () => {
+    const dir = makeTempDir();
+    const statePath = path.join(dir, 'STATE.md');
+    fs.writeFileSync(
+      statePath,
+      [
+        '---',
+        'status: executing',
+        '---',
+        '',
+        '# State',
+        '',
+        'Current Phase: 02',
+        '',
+      ].join('\n'),
+      'utf-8',
+    );
+
+    runStateMutationTransaction({
+      statePath,
+      cwd: dir,
+      transform: (content) => content.replace('Current Phase: 02', 'Current Phase: 03'),
+      acquireStateLock: (p) => `${p}.lock`,
+      releaseStateLock: () => {},
+      buildStateFrontmatter: () => ({ status: 'unknown', current_phase: '03' }),
+      normalizeMd: (content) => content,
+      atomicWriteFileSync: fs.writeFileSync,
+      extractFrontmatter,
+      stripFrontmatter,
+      reconstructFrontmatter,
+      fs,
+      mutationSurface: 'full',
+    });
+
+    const after = fs.readFileSync(statePath, 'utf-8');
+    assert.match(after, /status: executing/);
+    assert.match(after, /current_phase: 03/);
   });
 });

@@ -187,32 +187,7 @@ export async function releaseStateLock(lockPath: string): Promise<void> {
   try { await unlink(lockPath); } catch { /* already gone */ }
 }
 
-// ─── Frontmatter sync + write helpers ─────────────────────────────────────
-
-/**
- * Sync STATE.md content with rebuilt YAML frontmatter.
- *
- * Strips existing frontmatter, rebuilds from body + disk, and splices back.
- * Preserves existing status when body-derived status is 'unknown'.
- */
-async function syncStateFrontmatter(
-  content: string,
-  projectDir: string,
-  workstream?: string,
-  options: { preserveExistingProgress?: boolean } = {},
-): Promise<string> {
-  const existingFm = extractFrontmatter(content);
-  const body = stripFrontmatter(content);
-  const derivedFm = await buildStateFrontmatter(body, projectDir, workstream, options);
-
-  // Preserve existing status when body-derived is 'unknown'
-  if (derivedFm.status === 'unknown' && existingFm.status && existingFm.status !== 'unknown') {
-    derivedFm.status = existingFm.status;
-  }
-
-  const yamlStr = reconstructFrontmatter(derivedFm);
-  return `---\n${yamlStr}\n---\n\n${body}`;
-}
+// ─── Write helpers ────────────────────────────────────────────────────────
 
 /**
  * Atomic read-modify-write for STATE.md.
@@ -238,7 +213,7 @@ async function readModifyWriteStateMd(
     transform: modifier,
     acquireStateLock,
     releaseStateLock,
-    syncStateFrontmatter,
+    buildStateFrontmatter,
     normalizeMd,
     writeFile,
     extractFrontmatter,
@@ -268,7 +243,7 @@ export async function readModifyWriteStateMdFull(
     transform: modifier,
     acquireStateLock,
     releaseStateLock,
-    syncStateFrontmatter,
+    buildStateFrontmatter,
     normalizeMd,
     writeFile,
     extractFrontmatter,

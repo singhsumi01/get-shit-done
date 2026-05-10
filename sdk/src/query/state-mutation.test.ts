@@ -7,6 +7,9 @@ import { mkdtemp, writeFile, readFile, rm, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { existsSync } from 'node:fs';
+import { extractFrontmatter, stripFrontmatter } from './frontmatter.js';
+import { reconstructFrontmatter } from './frontmatter-mutation.js';
+import { normalizeMd } from './helpers.js';
 
 // ─── Helpers (internal) ─────────────────────────────────────────────────────
 
@@ -79,6 +82,45 @@ describe('state-mutation imports', () => {
   it('exports STATE.md mutation transaction Interface', async () => {
     const mod = await import('./state-transaction.js');
     expect(typeof mod.runStateMutationTransaction).toBe('function');
+  });
+
+  it('transaction Interface preserves existing status when projection is unknown', async () => {
+    const { runStateMutationTransaction } = await import('./state-transaction.js');
+    const tmpDir = await mkdtemp(join(tmpdir(), 'gsd-sdk-state-transaction-'));
+    try {
+      const dir = await setupTestProject(tmpDir, [
+        '---',
+        'status: executing',
+        '---',
+        '',
+        '# Project State',
+        '',
+        'Current Phase: 02',
+        '',
+      ].join('\n'));
+      const statePath = join(dir, '.planning', 'STATE.md');
+
+      await runStateMutationTransaction({
+        statePath,
+        projectDir: dir,
+        transform: (content) => content.replace('Current Phase: 02', 'Current Phase: 03'),
+        acquireStateLock: async (path) => `${path}.lock`,
+        releaseStateLock: async () => undefined,
+        buildStateFrontmatter: async () => ({ status: 'unknown', current_phase: '03' }),
+        normalizeMd,
+        writeFile,
+        extractFrontmatter,
+        stripFrontmatter,
+        reconstructFrontmatter,
+        mutationSurface: 'body',
+      });
+
+      const after = await readFile(statePath, 'utf-8');
+      expect(after).toContain('status: executing');
+      expect(after).toContain('current_phase: 03');
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
   });
 
   it('exports stateUpdate handler', async () => {
