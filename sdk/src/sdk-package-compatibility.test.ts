@@ -201,6 +201,20 @@ describe('SDK Package Seam Module', () => {
     expect(result).toEqual({ ok: true, mode: 'text', text: 'plain output', stderr: '' });
   });
 
+  it('returns explicit text output from legacy gsd-tools', async () => {
+    const script = await createScript('explicit-text.cjs', `process.stdout.write('  plain output  ');`);
+
+    const result = await runLegacyGsdTools({
+      projectDir: tmpDir!,
+      gsdToolsPath: script,
+      command: 'config-set',
+      args: ['key', 'value'],
+      mode: 'text',
+    });
+
+    expect(result).toEqual({ ok: true, mode: 'text', text: 'plain output', stderr: '' });
+  });
+
   it('classifies missing legacy gsd-tools assets', async () => {
     const result = await runLegacyGsdTools({
       projectDir,
@@ -270,6 +284,23 @@ describe('SDK Package Seam Module', () => {
     if (!result.ok) {
       expect(result.reason).toBe('parse_failed');
       expect(result.exitCode).toBe(0);
+    }
+  });
+
+  it('classifies spawn failures from legacy gsd-tools', async () => {
+    const script = await createScript('spawn.cjs', `process.stdout.write(JSON.stringify({ ok: true }));`);
+
+    const result = await runLegacyGsdTools({
+      projectDir: join(tmpDir!, 'missing-cwd'),
+      gsdToolsPath: script,
+      command: 'state',
+      args: ['load'],
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('spawn_failed');
+      expect(result.exitCode).toBeNull();
     }
   });
 
