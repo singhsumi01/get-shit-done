@@ -34,6 +34,10 @@ const os = require('node:os');
 const REPO_ROOT = path.join(__dirname, '..');
 const MODEL_CATALOG_CJS = path.join(REPO_ROOT, 'get-shit-done', 'bin', 'lib', 'model-catalog.cjs');
 const MODEL_CATALOG_JSON = path.join(REPO_ROOT, 'sdk', 'shared', 'model-catalog.json');
+const SHARED_RUNTIME_INSTALL_POLICY = JSON.parse(fs.readFileSync(
+  path.join(REPO_ROOT, 'sdk', 'shared', 'runtime-install-policy.json'),
+  'utf8'
+));
 
 const { install } = require('../bin/install.js');
 
@@ -254,6 +258,10 @@ module.exports = { catalog };
       `runtime-install-policy.json must be present at co-located path post-install: ${colocatedRuntimePolicyJson}`,
     );
     const parsedRuntimePolicy = JSON.parse(fs.readFileSync(colocatedRuntimePolicyJson, 'utf8'));
+    assert.ok(
+      parsedRuntimePolicy.runtimes && typeof parsedRuntimePolicy.runtimes === 'object',
+      'runtime install policy must include runtimes object',
+    );
     assert.ok(parsedRuntimePolicy.runtimes.claude, 'runtime install policy must include claude');
 
     const installedRuntimePolicyCjs = path.join(
@@ -271,6 +279,6 @@ module.exports = { catalog };
       installedRuntimePolicy = require(installedRuntimePolicyCjs);
     }, 'installed runtime-install-policy.cjs must not throw MODULE_NOT_FOUND after install');
 
-    assert.equal(installedRuntimePolicy.getDirName('claude'), '.claude');
+    assert.equal(installedRuntimePolicy.getDirName('claude'), SHARED_RUNTIME_INSTALL_POLICY.runtimes.claude.localDir);
   });
 });

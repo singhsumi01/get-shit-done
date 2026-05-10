@@ -70,7 +70,7 @@
       "global": { "env": "CODEX_HOME", "fallback": [".codex"] },
       "configDirFromHomeGlobal": ["'.codex'"],
       "skillsLayout": "flat",
-      "firstRunCommand": "$gsd-new-project",
+      "firstRunCommand": "/gsd-new-project",
       "capabilities": { "agents": true, "skills": true, "settingsJson": false, "hooks": true, "toml": true, "rulesFile": false, "statusline": false, "updateBanner": false },
       "configMutations": [
         { "target": "config.toml", "adapter": "codex-toml", "operation": "ensure-agent-profiles" },
@@ -179,7 +179,7 @@
       "promptPath": "~/.codeium/windsurf",
       "localDir": ".windsurf",
       "global": { "env": "WINDSURF_CONFIG_DIR", "fallback": [".codeium", "windsurf"] },
-      "configDirFromHomeGlobal": ["'.windsurf'"],
+      "configDirFromHomeGlobal": ["'.codeium'", "'windsurf'"],
       "skillsLayout": "flat",
       "firstRunCommand": "/gsd-new-project",
       "capabilities": { "agents": true, "skills": true, "settingsJson": false, "hooks": false, "toml": false, "rulesFile": false, "statusline": false, "updateBanner": false },

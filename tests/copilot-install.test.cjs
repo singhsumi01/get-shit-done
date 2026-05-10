@@ -157,7 +157,11 @@ describe('Source code integration (Copilot)', () => {
   });
 
   test('CLI-02: promptRuntime keeps Kilo above OpenCode in allRuntimes', () => {
-    assert.ok(allRuntimes.indexOf('kilo') < allRuntimes.indexOf('opencode'), 'kilo appears before opencode');
+    const kiloIdx = allRuntimes.indexOf('kilo');
+    const opencodeIdx = allRuntimes.indexOf('opencode');
+    assert.ok(kiloIdx !== -1, 'allRuntimes includes kilo');
+    assert.ok(opencodeIdx !== -1, 'allRuntimes includes opencode');
+    assert.ok(kiloIdx < opencodeIdx, 'kilo appears before opencode');
   });
 
   test('isCopilot variable exists in install function', () => {

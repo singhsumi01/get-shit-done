@@ -78,9 +78,9 @@ describe('bug #3126: runtime-homes getGlobalConfigDir — defaults', () => {
       }
     });
   }
-  test('unknown runtime falls back to ~/.claude', () => {
+  test('unknown runtime fails loudly', () => {
     withEnv('CLAUDE_CONFIG_DIR', undefined, () => {
-      assert.strictEqual(getGlobalConfigDir('unknown-xyz'), path.join(os.homedir(), '.claude'));
+      assert.throws(() => getGlobalConfigDir('unknown-xyz'), /Unknown runtime: unknown-xyz/);
     });
   });
 });

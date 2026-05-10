@@ -76,7 +76,11 @@ function applyConfigMutations(plan, context = {}) {
 
   for (const mutation of plan.configMutations) {
     const handler = getConfigMutationHandler(registry, mutation);
-    if (!handler) continue;
+    if (!handler) {
+      throw new Error(
+        `No config mutation handler registered for adapter="${mutation.adapter}" operation="${mutation.operation}"`
+      );
+    }
     handler({ mutation, context, adapters, configDir });
   }
 }

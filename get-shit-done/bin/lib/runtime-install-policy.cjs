@@ -24,9 +24,9 @@ function expandTilde(p, homeDir = os.homedir()) {
 }
 
 const _policyCandidates = [
+  process.env.GSD_RUNTIME_INSTALL_POLICY ? path.resolve(process.env.GSD_RUNTIME_INSTALL_POLICY) : null,
   path.resolve(__dirname, '..', 'shared', 'runtime-install-policy.json'),
   path.resolve(__dirname, '..', '..', '..', 'sdk', 'shared', 'runtime-install-policy.json'),
-  process.env.GSD_RUNTIME_INSTALL_POLICY ? path.resolve(process.env.GSD_RUNTIME_INSTALL_POLICY) : null,
 ].filter(Boolean);
 
 let runtimeInstallPolicyData = null;
@@ -61,7 +61,11 @@ const allRuntimes = Object.freeze(Object.entries(RUNTIME_REGISTRY)
   .map(([runtime]) => runtime));
 
 function getRuntimePolicy(runtime) {
-  return RUNTIME_REGISTRY[runtime] || RUNTIME_REGISTRY.claude;
+  const policy = RUNTIME_REGISTRY[runtime];
+  if (!policy) {
+    throw new Error(`Unknown runtime: ${String(runtime)}`);
+  }
+  return policy;
 }
 
 function getDirName(runtime) {

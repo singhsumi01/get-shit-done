@@ -2,7 +2,7 @@
 
 process.env.GSD_TEST_MODE = '1';
 
-const { describe, test } = require('node:test');
+const { afterEach, describe, test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -21,8 +21,21 @@ const {
 } = require('../get-shit-done/bin/lib/runtime-install-executor.cjs');
 
 describe('Runtime install plan execution', () => {
+  const tempDirs = [];
+  function makeTempDir(prefix) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+    tempDirs.push(tmp);
+    return tmp;
+  }
+
+  afterEach(() => {
+    for (const tmp of tempDirs.splice(0)) {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   test('settings-json mutation writes managed settings through the plan dispatcher', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-runtime-plan-settings-'));
+    const tmp = makeTempDir('gsd-runtime-plan-settings-');
     const settingsPath = path.join(tmp, 'settings.json');
     const plan = createRuntimeInstallPlan({ runtime: 'claude', scope: 'local', cwd: tmp });
 
@@ -41,7 +54,7 @@ describe('Runtime install plan execution', () => {
   });
 
   test('json permission mutations execute for runtimes without settings.json', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-runtime-plan-opencode-'));
+    const tmp = makeTempDir('gsd-runtime-plan-opencode-');
     const plan = createRuntimeInstallPlan({ runtime: 'opencode', scope: 'local', cwd: tmp });
 
     assert.equal(plan.capabilities.settingsJson, false);
@@ -104,27 +117,28 @@ describe('Runtime install plan execution', () => {
     ]);
   });
 
-  test('unregistered config mutation adapters are explicit no-ops', () => {
-    const calls = [];
+  test('unregistered config mutation adapters fail fast', () => {
+    assert.throws(() => {
+      applyExecutorConfigMutations({
+        targetDir: '/tmp/runtime',
+        configMutations: [
+          { adapter: 'unknown-json', operation: 'ensure-something' },
+        ],
+      });
+    }, /No config mutation handler registered for adapter="unknown-json" operation="ensure-something"/);
 
-    applyExecutorConfigMutations({
-      targetDir: '/tmp/runtime',
-      configMutations: [
-        { adapter: 'unknown-json', operation: 'ensure-something' },
-        { adapter: 'settings-json', operation: 'unknown-operation' },
-      ],
-    }, {
-      adapters: {
-        writeSettings() { calls.push('writeSettings'); },
-        validateHookFields(settings) { return settings; },
-      },
-    });
-
-    assert.deepStrictEqual(calls, []);
+    assert.throws(() => {
+      applyExecutorConfigMutations({
+        targetDir: '/tmp/runtime',
+        configMutations: [
+          { adapter: 'settings-json', operation: 'unknown-operation' },
+        ],
+      });
+    }, /No config mutation handler registered for adapter="settings-json" operation="unknown-operation"/);
   });
 
   test('no-settings runtimes with no mutation intents are executor no-ops', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-runtime-plan-trae-'));
+    const tmp = makeTempDir('gsd-runtime-plan-trae-');
     const plan = createRuntimeInstallPlan({ runtime: 'trae', scope: 'local', cwd: tmp });
 
     assert.equal(plan.capabilities.settingsJson, false);
@@ -144,7 +158,7 @@ describe('Runtime install plan execution', () => {
   });
 
   test('bundled hook artifact copies runtime-templated hook files', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-runtime-plan-hooks-'));
+    const tmp = makeTempDir('gsd-runtime-plan-hooks-');
     const packageSrc = path.join(tmp, 'pkg');
     const hooksDist = path.join(packageSrc, 'hooks', 'dist');
     fs.mkdirSync(hooksDist, { recursive: true });

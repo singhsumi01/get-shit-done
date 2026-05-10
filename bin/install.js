@@ -219,6 +219,8 @@ function applyConfigMutations(plan, context = {}) {
       validateHookFields,
       configureOpencodePermissions,
       configureKiloPermissions,
+      configureCopilotInstructions,
+      configureClineRules,
       ...(context.adapters || {}),
     },
   });
@@ -4328,6 +4330,37 @@ function mergeCopilotInstructions(filePath, gsdContent) {
   fs.writeFileSync(filePath, content);
 }
 
+function configureCopilotInstructions(_mutation, context = {}) {
+  const configDir = context.configDir;
+  if (!configDir) return;
+  const templatePath = path.join(configDir, 'get-shit-done', 'templates', 'copilot-instructions.md');
+  const instructionsPath = path.join(configDir, 'copilot-instructions.md');
+  if (!fs.existsSync(templatePath)) return;
+  const template = fs.readFileSync(templatePath, 'utf8');
+  mergeCopilotInstructions(instructionsPath, template);
+  console.log(`  ${green}✓${reset} Generated copilot-instructions.md`);
+}
+
+function configureClineRules(_mutation, context = {}) {
+  const configDir = context.configDir;
+  if (!configDir) return;
+  const clinerulesDest = path.join(configDir, '.clinerules');
+  const clinerules = [
+    '# GSD — Get Shit Done',
+    '',
+    '- GSD workflows live in `get-shit-done/workflows/`. Load the relevant workflow when',
+    '  the user runs a `/gsd-*` command.',
+    '- GSD agents live in `agents/`. Use the matching agent when spawning subagents.',
+    '- GSD tools are at `get-shit-done/bin/gsd-tools.cjs`. Run with `node`.',
+    '- Planning artifacts live in `.planning/`. Never edit them outside a GSD workflow.',
+    '- Do not apply GSD workflows unless the user explicitly asks for them.',
+    '- When a GSD command triggers a deliverable (feature, fix, docs), offer the next',
+    '  step to the user using Cline\'s ask_user tool after completing it.',
+  ].join('\n') + '\n';
+  fs.writeFileSync(clinerulesDest, clinerules);
+  console.log(`  ${green}✓${reset} Wrote .clinerules`);
+}
+
 /**
  * Strip GSD section from copilot-instructions.md content.
  * Returns cleaned content, or null if file should be deleted (was GSD-only).
@@ -7217,6 +7250,9 @@ function install(isGlobal, runtime = 'claude') {
   const isHermes = runtime === 'hermes';
   const isCodebuddy = runtime === 'codebuddy';
   const isCline = runtime === 'cline';
+  const shouldHandleCodex = isCodex &&
+    hasConfigMutation(installPlan, 'codex-toml', 'ensure-agent-profiles') &&
+    !isMinimalMode(installMode);
   const dirName = installPlan.localDir;
   const src = path.join(__dirname, '..');
 
@@ -7294,7 +7330,7 @@ function install(isGlobal, runtime = 'claude') {
   // Map<filename, Buffer> — content snapshot of each pre-existing gsd-* agent file.
   const codexPreInstallAgentContents = new Map();
   let codexPreInstallVersionBytes = null;
-  if (hasConfigMutation(installPlan, 'codex-toml', 'ensure-agent-profiles') && !isMinimalMode(installMode)) {
+  if (shouldHandleCodex) {
     const _preSkillsDir = path.join(targetDir, 'skills');
     if (fs.existsSync(_preSkillsDir)) {
       for (const entry of fs.readdirSync(_preSkillsDir, { withFileTypes: true })) {
@@ -7348,7 +7384,7 @@ function install(isGlobal, runtime = 'claude') {
   // atomic-write temp files. It is safe to call before any writes have happened.
   // The full restoreCodexSnapshot() (defined inside the config block) additionally
   // handles config.toml, which is not yet touched at this point in the pipeline.
-  const _codexPreConfigRollback = !isCodex || isMinimalMode(installMode) ? null : () => {
+  const _codexPreConfigRollback = !shouldHandleCodex ? null : () => {
     // skills/gsd-* — pass 1: restore snapshot entries (may be absent if deleted mid-install).
     const _earlySkillsDir = path.join(targetDir, 'skills');
     for (const skillName of codexPreInstallSkillNames) {
@@ -8008,7 +8044,7 @@ function install(isGlobal, runtime = 'claude') {
     throw _earlyInstallErr;
   }
 
-  if (isCodex && !isMinimalMode(installMode)) {
+  if (shouldHandleCodex) {
     // Capture pre-install snapshot of config.toml before ANY GSD mutation
     // (#2760 fix 3). On post-write schema-validation failure OR any throw
     // during the mutation sequence (write failure, merge throw, etc.) we
@@ -8159,17 +8195,30 @@ function install(isGlobal, runtime = 'claude') {
     console.log(`  ${green}✓${reset} Generated ${agentCount} agent .toml config files`);
 
     // Copy hook files that are referenced in config.toml (#2153).
-    runtimeInstallExecutor.copyBundledHooksArtifact(installPlan, {
-      packageSrc: src,
-      targetDir,
-      version: pkg.version,
-      allowTomlHooks: true,
-      writeCommonJsPackageJson: false,
-      bundledLabel: false,
-      log: console.log,
-      warn: console.warn,
-      colors: { green, yellow, reset },
-    });
+    let codexHookCopy;
+    try {
+      codexHookCopy = runtimeInstallExecutor.copyBundledHooksArtifact(installPlan, {
+        packageSrc: src,
+        targetDir,
+        version: pkg.version,
+        allowTomlHooks: true,
+        writeCommonJsPackageJson: false,
+        bundledLabel: false,
+        log: console.log,
+        warn: console.warn,
+        colors: { green, yellow, reset },
+      });
+    } catch (e) {
+      restoreCodexSnapshot();
+      throw new Error(`Codex hook artifact install failed: ${e && e.message ? e.message : String(e)}`);
+    }
+    const codexHookFailures = codexHookCopy && Array.isArray(codexHookCopy.failures) ? codexHookCopy.failures : [];
+    if (!codexHookCopy || codexHookCopy.missingSource || codexHookCopy.skipped || codexHookFailures.length > 0) {
+      restoreCodexSnapshot();
+      throw new Error(
+        `Codex hook artifact install failed: ${codexHookCopy ? (codexHookFailures.join(', ') || 'hooks artifact not copied') : 'no result returned'}`
+      );
+    }
 
     // Add Codex hooks (SessionStart for update checking) — requires codex_hooks feature flag
     const configPath = path.join(targetDir, 'config.toml');
@@ -8306,14 +8355,7 @@ function install(isGlobal, runtime = 'claude') {
   }
 
   if (hasConfigMutation(installPlan, 'copilot-instructions', 'ensure-managed-instructions')) {
-    // Generate copilot-instructions.md
-    const templatePath = path.join(targetDir, 'get-shit-done', 'templates', 'copilot-instructions.md');
-    const instructionsPath = path.join(targetDir, 'copilot-instructions.md');
-    if (fs.existsSync(templatePath)) {
-      const template = fs.readFileSync(templatePath, 'utf8');
-      mergeCopilotInstructions(instructionsPath, template);
-      console.log(`  ${green}✓${reset} Generated copilot-instructions.md`);
-    }
+    applyConfigMutations(installPlan, { configDir: targetDir });
     // Copilot: no settings.json, no hooks, no statusline (like Codex)
     return { settingsPath: null, settings: null, statuslineCommand: null, updateBannerCommand: null, runtime, configDir: targetDir, installPlan };
   }
@@ -8334,22 +8376,7 @@ function install(isGlobal, runtime = 'claude') {
   }
 
   if (hasConfigMutation(installPlan, 'cline-rules', 'ensure-runtime-rules')) {
-    // Cline uses .clinerules — generate a rules file with GSD system instructions
-    const clinerulesDest = path.join(targetDir, '.clinerules');
-    const clinerules = [
-      '# GSD — Get Shit Done',
-      '',
-      '- GSD workflows live in `get-shit-done/workflows/`. Load the relevant workflow when',
-      '  the user runs a `/gsd-*` command.',
-      '- GSD agents live in `agents/`. Use the matching agent when spawning subagents.',
-      '- GSD tools are at `get-shit-done/bin/gsd-tools.cjs`. Run with `node`.',
-      '- Planning artifacts live in `.planning/`. Never edit them outside a GSD workflow.',
-      '- Do not apply GSD workflows unless the user explicitly asks for them.',
-      '- When a GSD command triggers a deliverable (feature, fix, docs), offer the next',
-      '  step to the user using Cline\'s ask_user tool after completing it.',
-    ].join('\n') + '\n';
-    fs.writeFileSync(clinerulesDest, clinerules);
-    console.log(`  ${green}✓${reset} Wrote .clinerules`);
+    applyConfigMutations(installPlan, { configDir: targetDir });
     return { settingsPath: null, settings: null, statuslineCommand: null, updateBannerCommand: null, runtime, configDir: targetDir, installPlan };
   }
 

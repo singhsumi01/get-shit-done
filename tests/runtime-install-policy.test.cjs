@@ -61,41 +61,7 @@ describe('Runtime Install Policy Module', () => {
   });
 
   test('registry owns every interactive runtime option', () => {
-    assert.deepStrictEqual(runtimeMap, {
-      '1': 'claude',
-      '2': 'antigravity',
-      '3': 'augment',
-      '4': 'cline',
-      '5': 'codebuddy',
-      '6': 'codex',
-      '7': 'copilot',
-      '8': 'cursor',
-      '9': 'gemini',
-      '10': 'hermes',
-      '11': 'kilo',
-      '12': 'opencode',
-      '13': 'qwen',
-      '14': 'trae',
-      '15': 'windsurf',
-    });
-    assert.deepStrictEqual(allRuntimes, [
-      'claude',
-      'antigravity',
-      'augment',
-      'cline',
-      'codebuddy',
-      'codex',
-      'copilot',
-      'cursor',
-      'gemini',
-      'hermes',
-      'kilo',
-      'opencode',
-      'qwen',
-      'trae',
-      'windsurf',
-    ]);
-    assert.deepStrictEqual(parseRuntimeInput('16'), allRuntimes);
+    assert.deepStrictEqual(parseRuntimeInput(SHARED_RUNTIME_INSTALL_POLICY.allRuntimesOption), allRuntimes);
   });
 
   test('CJS runtime registry projects the shared runtime install policy without drift', () => {
@@ -122,6 +88,13 @@ describe('Runtime Install Policy Module', () => {
       assert.equal(getConfigDirFromHome(runtime, false), `'${policy.localDir}'`, `${runtime} local fragment`);
       assert.equal(getConfigDirFromHome(runtime, true), policy.configDirFromHomeGlobal.join(', '), `${runtime} global fragment`);
     }
+  });
+
+  test('unknown runtimes fail loudly', () => {
+    assert.throws(
+      () => createRuntimeInstallPlan({ runtime: 'bogus' }),
+      /Unknown runtime: bogus/
+    );
   });
 
   test('global target policy honors explicit dirs before env and defaults', () => {
