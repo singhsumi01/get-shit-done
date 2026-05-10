@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 
 /**
  * STATE.md Mutation Transaction Module.
@@ -26,6 +26,10 @@ export interface StateMutationTransactionOptions {
   reconstructFrontmatter: (frontmatter: Record<string, unknown>) => string;
   resync?: boolean;
   preserveExistingProgress?: boolean;
+  /**
+   * Mutation input surface. Defaults to 'full' for CJS parity; pass 'body'
+   * when the transform must not see or match YAML frontmatter fields.
+   */
   mutationSurface?: 'full' | 'body';
   dryRun?: boolean;
 }
@@ -46,13 +50,18 @@ export async function runStateMutationTransaction(options: StateMutationTransact
     reconstructFrontmatter,
     resync = true,
     preserveExistingProgress = false,
-    mutationSurface = 'body',
+    mutationSurface = 'full',
     dryRun = false,
   } = options;
 
   const lockPath = await acquireStateLock(statePath);
   try {
-    const content = existsSync(statePath) ? readFileSync(statePath, 'utf-8') : '';
+    let content = '';
+    try {
+      content = await readFile(statePath, 'utf-8');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
     const originalFm = extractFrontmatter(content);
     const preFm = !resync ? originalFm : null;
     const mutationInput = mutationSurface === 'body' ? stripFrontmatter(content) : content;

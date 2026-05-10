@@ -988,6 +988,10 @@ function writeStateMd(statePath, content, cwd) {
  *   progress.* counters in the frontmatter (#3242 Bug A).
  *   When resync is false, the transaction still rebuilds frontmatter but
  *   preserves existing progress.* sub-keys from the pre-transform file.
+ *   This CJS helper intentionally uses mutationSurface: 'full', so transforms
+ *   see YAML frontmatter and body. Helpers like stateReplaceField can match
+ *   frontmatter keys when names overlap; strip frontmatter or target body-only
+ *   fields before reusing transforms from the SDK body-surface helper.
  */
 function readModifyWriteStateMd(statePath, transformFn, cwd, options) {
   return runStateMutationTransaction({
@@ -1504,44 +1508,8 @@ function cmdStateSync(cwd, options, raw) {
     }
   }
 
-  const applyPlanAndActivity = (input) => {
-    let modified = input;
-    if (highestIncompletePhase) {
-      const currentPlansField = stateExtractField(modified, 'Total Plans in Phase');
-      if (currentPlansField && parseInt(currentPlansField, 10) !== highestIncompletePhaseplanCount) {
-        const result = stateReplaceField(modified, 'Total Plans in Phase', String(highestIncompletePhaseplanCount));
-        if (result) modified = result;
-      }
-    }
-
-    const result = stateReplaceField(modified, 'Last Activity', today);
-    if (result) modified = result;
-    return modified;
-  };
-
-  const projected = runStateMutationTransaction({
-    statePath,
-    cwd,
-    transform: applyPlanAndActivity,
-    acquireStateLock,
-    releaseStateLock,
-    buildStateFrontmatter,
-    normalizeMd,
-    atomicWriteFileSync,
-    extractFrontmatter,
-    stripFrontmatter,
-    reconstructFrontmatter,
-    fs,
-    dryRun: true,
-    mutationSurface: 'full',
-  });
-  const projectedFm = extractFrontmatter(projected);
-  const projectedProgress = projectedFm.progress && typeof projectedFm.progress === 'object' ? projectedFm.progress : {};
-  const percent = Number.isFinite(Number(projectedProgress.percent)) ? Number(projectedProgress.percent) : 0;
-
   const finalTransform = (input) => {
     let modified = input;
-
     if (highestIncompletePhase) {
       const currentPlansField = stateExtractField(modified, 'Total Plans in Phase');
       if (currentPlansField && parseInt(currentPlansField, 10) !== highestIncompletePhaseplanCount) {
@@ -1550,6 +1518,14 @@ function cmdStateSync(cwd, options, raw) {
         if (result) modified = result;
       }
     }
+
+    const oldActivity = stateExtractField(modified, 'Last Activity');
+    const activityResult = stateReplaceField(modified, 'Last Activity', today);
+    if (activityResult) modified = activityResult;
+
+    const projectedFm = buildStateFrontmatter(stripFrontmatter(modified), cwd);
+    const projectedProgress = projectedFm.progress && typeof projectedFm.progress === 'object' ? projectedFm.progress : {};
+    const percent = Number.isFinite(Number(projectedProgress.percent)) ? Number(projectedProgress.percent) : 0;
 
     const currentProgress = stateExtractField(modified, 'Progress');
     if (currentProgress) {
@@ -1565,13 +1541,8 @@ function cmdStateSync(cwd, options, raw) {
       }
     }
 
-    const result = stateReplaceField(modified, 'Last Activity', today);
-    if (result) {
-      const oldActivity = stateExtractField(modified, 'Last Activity');
-      if (oldActivity !== today) {
-        changes.push(`Last Activity: ${oldActivity} -> ${today}`);
-      }
-      modified = result;
+    if (activityResult && oldActivity !== today) {
+      changes.push(`Last Activity: ${oldActivity} -> ${today}`);
     }
 
     return modified;

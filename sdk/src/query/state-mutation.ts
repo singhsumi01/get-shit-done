@@ -193,6 +193,9 @@ export async function releaseStateLock(lockPath: string): Promise<void> {
  * Atomic read-modify-write for STATE.md.
  *
  * Holds lock across the entire read -> transform -> write cycle.
+ * The SDK wrapper uses mutationSurface: 'body', so transforms do not see YAML
+ * frontmatter. This differs from the CJS helper's full-file surface; helpers
+ * like stateReplaceField can match frontmatter keys if run against full content.
  *
  * @param projectDir - Project root directory
  * @param modifier - Function to transform STATE.md content
@@ -202,7 +205,7 @@ async function readModifyWriteStateMd(
   projectDir: string,
   modifier: (content: string) => string | Promise<string>,
   workstream?: string,
-  options: { resync?: boolean; preserveExistingProgress?: boolean } = {},
+  options: { resync?: boolean; preserveExistingProgress?: boolean; dryRun?: boolean } = {},
 ): Promise<string> {
   const statePath = planningPaths(projectDir, workstream).state;
   const resync = options.resync !== false;
@@ -220,8 +223,9 @@ async function readModifyWriteStateMd(
     stripFrontmatter,
     reconstructFrontmatter,
     resync,
-    preserveExistingProgress: options.preserveExistingProgress !== false,
+    preserveExistingProgress: options.preserveExistingProgress === true,
     mutationSurface: 'body',
+    dryRun: options.dryRun === true,
   });
 }
 
@@ -1119,6 +1123,7 @@ export const stateMilestoneSwitch: QueryHandler = async (args, projectDir, works
   const today = new Date().toISOString().split('T')[0]!;
   const statePath = planningPaths(projectDir, workstream).state;
   let existingStateVersion: unknown = '1.0';
+  // runStateMutationTransaction awaits transform before buildStateFrontmatter, so existingStateVersion is intentionally populated in transform for buildStateFrontmatter.
 
   await runStateMutationTransaction({
     statePath,
@@ -1396,44 +1401,7 @@ export const stateSync: QueryHandler = async (args, projectDir, workstream) => {
     }
   }
 
-  const applyPlanAndActivity = (modified: string): string => {
-    let m = modified;
-    if (highestIncompletePhase) {
-      const currentPlansField = stateExtractField(m, 'Total Plans in Phase');
-      if (currentPlansField && parseInt(currentPlansField, 10) !== highestIncompletePhaseplanCount) {
-        const result = stateReplaceField(m, 'Total Plans in Phase', String(highestIncompletePhaseplanCount));
-        if (result) m = result;
-      }
-    }
-
-    const r = stateReplaceField(m, 'Last Activity', today);
-    if (r) m = r;
-    return m;
-  };
-
-  const projected = await runStateMutationTransaction({
-    statePath,
-    projectDir,
-    workstream,
-    transform: applyPlanAndActivity,
-    acquireStateLock,
-    releaseStateLock,
-    buildStateFrontmatter,
-    normalizeMd,
-    writeFile,
-    extractFrontmatter,
-    stripFrontmatter,
-    reconstructFrontmatter,
-    dryRun: true,
-    mutationSurface: 'body',
-  });
-  const projectedFm = extractFrontmatter(projected);
-  const projectedProgress = projectedFm.progress && typeof projectedFm.progress === 'object'
-    ? projectedFm.progress as Record<string, unknown>
-    : {};
-  const percent = Number.isFinite(Number(projectedProgress.percent)) ? Number(projectedProgress.percent) : 0;
-
-  const runModifier = (modified: string): string => {
+  const runModifier = async (modified: string): Promise<string> => {
     let m = modified;
     if (highestIncompletePhase) {
       const currentPlansField = stateExtractField(m, 'Total Plans in Phase');
@@ -1443,6 +1411,16 @@ export const stateSync: QueryHandler = async (args, projectDir, workstream) => {
         if (result) m = result;
       }
     }
+
+    const oldActivity = stateExtractField(m, 'Last Activity');
+    const activityResult = stateReplaceField(m, 'Last Activity', today);
+    if (activityResult) m = activityResult;
+
+    const projectedFm = await buildStateFrontmatter(m, projectDir, workstream);
+    const projectedProgress = projectedFm.progress && typeof projectedFm.progress === 'object'
+      ? projectedFm.progress as Record<string, unknown>
+      : {};
+    const percent = Number.isFinite(Number(projectedProgress.percent)) ? Number(projectedProgress.percent) : 0;
 
     const currentProgress = stateExtractField(m, 'Progress');
     if (currentProgress) {
@@ -1458,34 +1436,14 @@ export const stateSync: QueryHandler = async (args, projectDir, workstream) => {
       }
     }
 
-    const oldActivity = stateExtractField(m, 'Last Activity');
-    const r = stateReplaceField(m, 'Last Activity', today);
-    if (r) {
-      if (oldActivity !== today) {
-        changes.push(`Last Activity: ${oldActivity} -> ${today}`);
-      }
-      m = r;
+    if (activityResult && oldActivity !== today) {
+      changes.push(`Last Activity: ${oldActivity} -> ${today}`);
     }
     return m;
   };
 
   if (verify) {
-    await runStateMutationTransaction({
-      statePath,
-      projectDir,
-      workstream,
-      transform: runModifier,
-      acquireStateLock,
-      releaseStateLock,
-      buildStateFrontmatter,
-      normalizeMd,
-      writeFile,
-      extractFrontmatter,
-      stripFrontmatter,
-      reconstructFrontmatter,
-      dryRun: true,
-      mutationSurface: 'body',
-    });
+    await readModifyWriteStateMd(projectDir, (body) => runModifier(body), workstream, { dryRun: true });
     return { data: { synced: false, changes, dry_run: true } };
   }
 

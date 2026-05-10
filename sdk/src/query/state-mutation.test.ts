@@ -930,10 +930,9 @@ Resume file: None
     expect(fm.status).toBe('shipped');
   });
 
-  it('record-session preserves progress from frontmatter when disk scan returns zero counts', async () => {
-    // Shipped milestone: phase directories have been archived, so disk scan
-    // returns total_plans=0. Existing frontmatter has authoritative counts
-    // (5/5, 12/12, 100%). Before the fix, disk scan stomped the counts to 0/0.
+  it('record-session recomputes progress from disk when scan returns zero counts', async () => {
+    // SDK mutation defaults match the CJS CLI: disk scan is authoritative unless
+    // a caller explicitly opts into preserveExistingProgress.
     const stateContent = `---
 gsd_state_version: 1.0
 milestone: v12.0
@@ -971,9 +970,9 @@ Resume file: None
     const { extractFrontmatter } = await import('./frontmatter.js');
     const fm = extractFrontmatter(after);
     const progress = fm.progress as Record<string, unknown>;
-    expect(Number(progress.total_plans)).toBe(12);
-    expect(Number(progress.completed_plans)).toBe(12);
-    expect(Number(progress.percent)).toBe(100);
+    expect(Number(progress.total_plans)).toBe(0);
+    expect(Number(progress.completed_plans)).toBe(0);
+    expect(Number(progress.percent ?? 0)).toBe(0);
   });
 
   it('regression guard: state.update Status still updates frontmatter status when body is mutated', async () => {

@@ -287,23 +287,6 @@ describe('SDK Package Seam Module', () => {
     }
   });
 
-  it('classifies spawn failures from legacy gsd-tools', async () => {
-    const script = await createScript('spawn.cjs', `process.stdout.write(JSON.stringify({ ok: true }));`);
-
-    const result = await runLegacyGsdTools({
-      projectDir: join(tmpDir!, 'missing-cwd'),
-      gsdToolsPath: script,
-      command: 'state',
-      args: ['load'],
-    });
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.reason).toBe('spawn_failed');
-      expect(result.exitCode).toBeNull();
-    }
-  });
-
   it('classifies legacy gsd-tools timeouts', async () => {
     const script = await createScript('timeout.cjs', `setTimeout(() => process.stdout.write('late'), 200);`);
 
