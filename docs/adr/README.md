@@ -15,7 +15,8 @@ Each ADR documents one architectural decision: what was decided, why, and what c
 | [0005-sdk-architecture-seam-map.md](0005-sdk-architecture-seam-map.md) | SDK Architecture seam map for query/runtime surfaces | Accepted |
 | [0006-planning-path-projection-module.md](0006-planning-path-projection-module.md) | Planning Path Projection Module for SDK query handlers | Accepted |
 | [0007-sdk-package-seam-module.md](0007-sdk-package-seam-module.md) | SDK Package Seam Module owns SDK-to-get-shit-done-cc compatibility | Accepted |
-| [0008-runtime-install-policy-module.md](0008-runtime-install-policy-module.md) | Runtime Install Policy Module as shared runtime data | Accepted |
+| [0008-installer-migration-module.md](0008-installer-migration-module.md) | Installer Migration Module owns install-time upgrade safety | Accepted |
+| [0011-runtime-install-policy-module.md](0011-runtime-install-policy-module.md) | Runtime Install Policy Module as shared runtime data | Accepted |
 
 ## Seam map
 
@@ -23,4 +24,6 @@ ADR 0005 is the top-level SDK seam index. It references per-seam ADRs and states
 
 ADR 0006 documents how SDK query handlers project planning paths (`cwd → effectiveRoot → .planning/<project>/...`). Cross-reference with the Planning Workspace Module (ADR 0004) for workstream pointer policy.
 
-ADR 0008 documents runtime install policy ownership. Cross-reference with the Runtime Install Policy Module glossary entry in `CONTEXT.md` for the boundary between shared runtime data, install plan projection, runtime mutation Adapters, and SDK query path projection.
+ADR 0008 documents the Installer Migration Module for safe install-time moves, removals, config rewrites, and user-data preservation.
+
+ADR 0011 documents runtime install policy ownership. Cross-reference with the Runtime Install Policy Module glossary entry in `CONTEXT.md` for the boundary between shared runtime data, install plan projection, runtime mutation Adapters, and SDK query path projection.
