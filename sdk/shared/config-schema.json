@@ -43,6 +43,7 @@
     "workflow.security_block_on",
     "workflow.drift_threshold",
     "workflow.drift_action",
+    "ship.pr_body_sections",
     "git.branching_strategy",
     "git.base_branch",
     "git.phase_branch_template",

@@ -15,7 +15,8 @@ Each ADR documents one architectural decision: what was decided, why, and what c
 | [0005-sdk-architecture-seam-map.md](0005-sdk-architecture-seam-map.md) | SDK Architecture seam map for query/runtime surfaces | Accepted |
 | [0006-planning-path-projection-module.md](0006-planning-path-projection-module.md) | Planning Path Projection Module for SDK query handlers | Accepted |
 | [0007-sdk-package-seam-module.md](0007-sdk-package-seam-module.md) | SDK Package Seam Module owns SDK-to-get-shit-done-cc compatibility | Accepted |
-| [0008-config-schema-module.md](0008-config-schema-module.md) | Config Schema Module as shared schema data | Accepted |
+| [0008-installer-migration-module.md](0008-installer-migration-module.md) | Installer Migration Module owns install-time upgrade safety | Accepted |
+| [0010-config-schema-module.md](0010-config-schema-module.md) | Config Schema Module as shared schema data | Accepted |
 
 ## Seam map
 
@@ -23,4 +24,6 @@ ADR 0005 is the top-level SDK seam index. It references per-seam ADRs and states
 
 ADR 0006 documents how SDK query handlers project planning paths (`cwd → effectiveRoot → .planning/<project>/...`). Cross-reference with the Planning Workspace Module (ADR 0004) for workstream pointer policy.
 
-ADR 0008 documents config schema ownership. Cross-reference with the Config Schema Module glossary entry in `CONTEXT.md` for the boundary between shared schema data, runtime Adapters, config mutation handlers, and docs parity tests.
+ADR 0008 documents the Installer Migration Module for safe install-time moves, removals, config rewrites, and user-data preservation.
+
+ADR 0010 documents config schema ownership. Cross-reference with the Config Schema Module glossary entry in `CONTEXT.md` for the boundary between shared schema data, runtime Adapters, config mutation handlers, and docs parity tests.
