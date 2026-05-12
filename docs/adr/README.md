@@ -27,6 +27,7 @@ ADR 0006 documents how SDK query handlers project planning paths (`cwd → effec
 
 ADR 0008 documents the Installer Migration Module for safe install-time moves, removals, config rewrites, and user-data preservation.
 
-ADR 0009 proposes the Shell Command Projection Module for runtime-aware OS command rendering across installer and runtime surfaces.
+ADR 0009 documents the Shell Command Projection Module seam for runtime-aware
+projection of installer-owned command text and projection IR.
 
 ADR 0010 documents config schema ownership. Cross-reference with the Config Schema Module glossary entry in `CONTEXT.md` for the boundary between shared schema data, runtime Adapters, config mutation handlers, and docs parity tests.
