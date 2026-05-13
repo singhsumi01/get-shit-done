@@ -931,8 +931,8 @@ Resume file: None
   });
 
   it('record-session recomputes progress from disk when scan returns zero counts', async () => {
-    // SDK mutation defaults match the CJS CLI: disk scan is authoritative unless
-    // a caller explicitly opts into preserveExistingProgress.
+    // SDK mutation defaults intentionally differ from CJS writeStateMd:
+    // disk scan is authoritative unless a caller opts into preserving progress.
     const stateContent = `---
 gsd_state_version: 1.0
 milestone: v12.0

@@ -37,6 +37,8 @@ The seam does not own planning inventory policy. Phase, plan, summary, roadmap, 
 
 The seam does not make every STATE.md operation identical. Special flows such as milestone switching may provide a custom frontmatter projector when normal disk-derived projection would read stale on-disk state before the write lands.
 
+The seam also allows Adapter defaults to differ where their compatibility contracts differ. The CJS CLI `writeStateMd` preserves existing curated progress by default to avoid trampling shipped or archived milestone frontmatter, while SDK state mutations default to disk-derived progress unless a caller explicitly opts into `preserveExistingProgress`.
+
 ## Consequences
 
 Race-safety, frontmatter projection, progress preservation, status preservation, and sync dry-run behavior should be tested at the transaction Interface first.
