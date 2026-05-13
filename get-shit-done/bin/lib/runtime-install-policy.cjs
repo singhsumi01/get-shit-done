@@ -36,9 +36,7 @@ for (const _p of _policyCandidates) {
     runtimeInstallPolicyData = require(_p);
     break;
   } catch (e) {
-    const isMissingCandidate =
-      (e && e.code === 'MODULE_NOT_FOUND' && String(e.message || '').includes(_p)) ||
-      (e && e.code === 'ENOENT');
+    const isMissingCandidate = e && (e.code === 'MODULE_NOT_FOUND' || e.code === 'ENOENT');
     if (!isMissingCandidate) throw e;
     _policyLastErr = e;
   }
