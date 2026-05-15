@@ -21,6 +21,7 @@
 import { open, unlink, stat, readFile, writeFile, readdir } from 'node:fs/promises';
 import {
   constants, unlinkSync, existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync,
+  realpathSync,
 } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { GSDError, ErrorClassification } from '../errors.js';
@@ -90,14 +91,26 @@ function readTextArgOrFile(
   if (!filePath) {
     return (value ?? '').trim();
   }
-  const root = resolve(projectDir);
-  const resolved = isAbsolute(filePath) ? resolve(filePath) : resolve(root, filePath);
-  const rel = relative(root, resolved);
+  // Resolve symlinks on both the project root and the target path before
+  // comparing — matches CJS `validatePath` in security.cjs. On macOS,
+  // `os.tmpdir()` returns `/var/folders/...` but the realpath is
+  // `/private/var/folders/...`; without realpath normalization, the
+  // `relative()` check sees `/private/var/...` vs `/var/...` as different
+  // tree roots and rejects safe in-project files. Symlink resolution falls
+  // back to logical resolve() when the path doesn't exist yet (e.g., file
+  // about to be created).
+  function realpathOrResolve(p: string): string {
+    try { return realpathSync(p); } catch { return resolve(p); }
+  }
+  const resolvedBase = realpathOrResolve(resolve(projectDir));
+  const targetLogical = isAbsolute(filePath) ? resolve(filePath) : resolve(resolvedBase, filePath);
+  const resolvedTarget = realpathOrResolve(targetLogical);
+  const rel = relative(resolvedBase, resolvedTarget);
   if (rel.startsWith('..') || isAbsolute(rel)) {
     throw new Error(`${label} path rejected: outside project directory`);
   }
   try {
-    return readFileSync(resolved, 'utf-8').trimEnd();
+    return readFileSync(resolvedTarget, 'utf-8').trimEnd();
   } catch {
     throw new Error(`${label} file not found: ${filePath}`);
   }
@@ -307,6 +320,18 @@ export const stateUpdate: QueryHandler = async (args, projectDir, workstream) =>
     throw new GSDError('field and value required for state update', ErrorClassification.Validation);
   }
 
+  // Match CJS `cmdStateUpdate` contract: caller receives `{ updated: false,
+  // reason: '...' }` when the operation is a no-op so shell-script consumers
+  // can JSON.parse output and branch on the reason. Without an explicit
+  // STATE.md check up front, readModifyWriteStateMd's auto-create behavior
+  // would mask "STATE.md missing" as a successful no-op write.
+  const statePath = planningPaths(projectDir, workstream).state;
+  try {
+    await readFile(statePath, 'utf-8');
+  } catch {
+    return { data: { updated: false, reason: 'STATE.md not found' } };
+  }
+
   let updated = false;
   const shouldResync = PROGRESS_FRONTMATTER_FIELDS.has(field);
   await readModifyWriteStateMd(projectDir, (content) => {
@@ -321,7 +346,10 @@ export const stateUpdate: QueryHandler = async (args, projectDir, workstream) =>
     preserveExistingProgress: !shouldResync,
   });
 
-  return { data: { updated } };
+  if (!updated) {
+    return { data: { updated: false, reason: `Field "${field}" not found in STATE.md` } };
+  }
+  return { data: { updated: true } };
 };
 
 /**
@@ -631,6 +659,15 @@ export const stateRecordMetric: QueryHandler = async (args, projectDir, workstre
     return { data: { error: 'phase, plan, and duration required' } };
   }
 
+  // CJS `cmdStateRecordMetric` contract: error out if STATE.md doesn't exist
+  // rather than auto-creating it (which `readModifyWriteStateMd` would do).
+  const statePath = planningPaths(projectDir, workstream).state;
+  try {
+    await readFile(statePath, 'utf-8');
+  } catch {
+    return { data: { error: 'STATE.md not found' } };
+  }
+
   let recorded = false;
   let created = false;
   await readModifyWriteStateMd(projectDir, (content) => {
@@ -684,6 +721,16 @@ export const stateRecordMetric: QueryHandler = async (args, projectDir, workstre
  * @returns QueryResult with { updated, percent, completed, total }
  */
 export const stateUpdateProgress: QueryHandler = async (_args, projectDir, workstream) => {
+  // CJS `cmdStateUpdateProgress` contract: error out when STATE.md is missing.
+  // Without this check the SDK silently returns `{ updated: false }` with no
+  // STATE.md-aware reason, masking the missing-file condition.
+  const statePath = planningPaths(projectDir, workstream).state;
+  try {
+    await readFile(statePath, 'utf-8');
+  } catch {
+    return { data: { error: 'STATE.md not found' } };
+  }
+
   const phasesDir = planningPaths(projectDir, workstream).phases;
   let totalPlans = 0;
   let totalSummaries = 0;
@@ -845,6 +892,14 @@ export const stateResolveBlocker: QueryHandler = async (args, projectDir, workst
     return { data: { error: 'text required' } };
   }
 
+  // CJS `cmdStateResolveBlocker` contract: error out when STATE.md is missing.
+  const statePath = planningPaths(projectDir, workstream).state;
+  try {
+    await readFile(statePath, 'utf-8');
+  } catch {
+    return { data: { error: 'STATE.md not found' } };
+  }
+
   let removedMatchingLine = false;
   let blockersSectionFound = false;
 
@@ -877,13 +932,15 @@ export const stateResolveBlocker: QueryHandler = async (args, projectDir, workst
     return content;
   }, workstream);
 
-  if (removedMatchingLine) {
+  // CJS `cmdStateResolveBlocker` contract: `resolved: true` whenever the
+  // Blockers section was found, even if no line matched. The semantic is
+  // "the resolve operation ran against a Blockers section" rather than "a
+  // specific line was found and removed". Only `resolved: false` when the
+  // Blockers section itself is missing.
+  if (blockersSectionFound) {
     return { data: { resolved: true, blocker: searchText } };
   }
-  return { data: { resolved: false, reason: blockersSectionFound
-    ? 'Blocker text not found in STATE.md'
-    : 'Blockers section not found in STATE.md'
-  } };
+  return { data: { resolved: false, reason: 'Blockers section not found in STATE.md' } };
 };
 
 // ─── state.add-roadmap-evolution ─────────────────────────────────────────
@@ -1034,6 +1091,14 @@ export const stateRecordSession: QueryHandler = async (args, projectDir, workstr
   const parsed = parseNamedArgs(args, ['stopped-at', 'resume-file']);
   const stoppedAt = parsed['stopped-at'] as string | null | undefined;
   const resumeFile = ((parsed['resume-file'] as string | null) ?? 'None');
+
+  // CJS `cmdStateRecordSession` contract: error out when STATE.md is missing.
+  const statePath = planningPaths(projectDir, workstream).state;
+  try {
+    await readFile(statePath, 'utf-8');
+  } catch {
+    return { data: { error: 'STATE.md not found' } };
+  }
 
   const now = new Date().toISOString();
   const updated: string[] = [];
