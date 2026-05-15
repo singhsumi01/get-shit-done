@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "_comment": "Allowlist for scripts/lint-shared-module-handsync.cjs — Phase 6 of #3524 (#3575). Two categories: cooperatingSiblings (legitimate pairs, lint accepts silently) and migrateMeBacklog (known drift anti-patterns, lint warns but does not fail). All entries require cjs + ts path + classification + justification.",
+  "cooperatingSiblings": [
+    {
+      "cjs": "get-shit-done/bin/lib/active-workstream-store.cjs",
+      "ts": "sdk/src/query/active-workstream-store.ts",
+      "classification": "cooperating-sibling",
+      "justification": "CJS manages filesystem-backed workstream store; SDK layer wraps via Adapter for query dispatch. Different responsibilities, not drift."
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/config-schema.cjs",
+      "ts": "sdk/src/query/config-schema.ts",
+      "classification": "cooperating-sibling",
+      "justification": "SDK config-schema.ts is the generated source-of-truth derived from sdk/shared/config-schema.manifest.json (Phase 2/#3540). CJS config-schema.cjs is the Adapter that reads from that manifest. Not a hand-sync pair; freshness check enforces alignment."
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/frontmatter.cjs",
+      "ts": "sdk/src/query/frontmatter.ts",
+      "classification": "cooperating-sibling",
+      "justification": "CJS implements full frontmatter parsing/mutation; SDK frontmatter.ts is the native SDK query handler delegating to the CJS runtime via the seam bridge. Not duplicating logic."
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/init.cjs",
+      "ts": "sdk/src/query/init.ts",
+      "classification": "cooperating-sibling",
+      "justification": "CJS init.cjs is the authoritative initializer; SDK init.ts provides the native handler layer for the SDK query seam. Phase 5.2+ will migrate remaining subcommands, but current architecture is intentional."
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/phase.cjs",
+      "ts": "sdk/src/query/phase.ts",
+      "classification": "cooperating-sibling",
+      "justification": "CJS phase.cjs is the full phase lifecycle implementation; SDK phase.ts provides the native query handler. The SDK delegates to CJS for most subcommands. Phase 5.2+ candidate for further migration."
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/profile-output.cjs",
+      "ts": "sdk/src/query/profile-output.ts",
+      "classification": "cooperating-sibling",
+      "justification": "CJS profile-output.cjs handles profiling output rendering; SDK profile-output.ts is the corresponding SDK query handler. Separate responsibilities across the seam."
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/roadmap.cjs",
+      "ts": "sdk/src/query/roadmap.ts",
+      "classification": "cooperating-sibling",
+      "justification": "CJS roadmap.cjs is the full roadmap implementation; SDK roadmap.ts provides the native handler for SDK query dispatch. Phase 5.2+ candidate."
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/state.cjs",
+      "ts": "sdk/src/query/state.ts",
+      "classification": "cooperating-sibling",
+      "justification": "CJS state.cjs is the full state implementation; SDK state.ts routes known subcommands via executeForCjs (Phase 5.0/#3558, Phase 5.1/#3574). Intentional seam delegation pattern."
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/state-document.cjs",
+      "ts": "sdk/src/query/state-document.ts",
+      "classification": "cooperating-sibling",
+      "justification": "CJS state-document.cjs is the generated Adapter reading from sdk/src/state-document/ Shared Module (Phase 1/#3531). SDK state-document.ts is the corresponding source-of-truth query handler. Freshness check enforces alignment."
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/template.cjs",
+      "ts": "sdk/src/query/template.ts",
+      "classification": "cooperating-sibling",
+      "justification": "CJS template.cjs handles template operations; SDK template.ts is the corresponding SDK native handler. Separate responsibilities across the seam."
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/uat.cjs",
+      "ts": "sdk/src/query/uat.ts",
+      "classification": "cooperating-sibling",
+      "justification": "CJS uat.cjs implements UAT workflows; SDK uat.ts provides the SDK query handler layer. Separate responsibilities."
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/verify.cjs",
+      "ts": "sdk/src/query/verify.ts",
+      "classification": "cooperating-sibling",
+      "justification": "CJS verify.cjs is the full verify implementation; SDK verify.ts provides the native handler. Phase 5.2+ candidate for further delegation."
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/workstream.cjs",
+      "ts": "sdk/src/query/workstream.ts",
+      "classification": "cooperating-sibling",
+      "justification": "CJS workstream.cjs handles workstream management; SDK workstream.ts provides the SDK query handler. Workstream support inside sync bridge is an open follow-up item."
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/workstream-inventory.cjs",
+      "ts": "sdk/src/query/workstream-inventory.ts",
+      "classification": "cooperating-sibling",
+      "justification": "CJS workstream-inventory.cjs is the generated Adapter for the workstream-inventory Shared Module (Phase 3/#3548). SDK workstream-inventory.ts is the source-of-truth query handler. Freshness check enforces alignment."
+    }
+  ],
+  "migrateMeBacklog": [
+    {
+      "cjs": "get-shit-done/bin/lib/config.cjs",
+      "ts": "sdk/src/config.ts",
+      "classification": "drift-anti-pattern",
+      "justification": "MIGRATE_ME: Both CJS and SDK maintain independent config loading/merging logic. Candidate for Shared Module extraction (config-defaults.manifest.json + config-schema.manifest.json already exist in sdk/shared/). Root cause of bugs #1535, #2047, #2638, #2653, #2687, #2798, #3055, #3523.",
+      "trackedIn": "Phase 6 open follow-up — #3524"
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/decisions.cjs",
+      "ts": "sdk/src/query/decisions.ts",
+      "classification": "drift-anti-pattern",
+      "justification": "MIGRATE_ME: Parallel CJS and SDK decision-file reading logic. Candidate for Shared Module extraction.",
+      "trackedIn": "Phase 6 open follow-up — #3524"
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/intel.cjs",
+      "ts": "sdk/src/query/intel.ts",
+      "classification": "drift-anti-pattern",
+      "justification": "MIGRATE_ME: Parallel CJS and SDK intel management implementations. Candidate for Shared Module extraction.",
+      "trackedIn": "Phase 6 open follow-up — #3524"
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/model-catalog.cjs",
+      "ts": "sdk/src/model-catalog.ts",
+      "classification": "drift-anti-pattern",
+      "justification": "MIGRATE_ME: sdk/shared/model-catalog.json is the manifest; both CJS and SDK read it independently. Candidate for unified Shared Module with a single generator and freshness check.",
+      "trackedIn": "Phase 6 open follow-up — #3524"
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/plan-scan.cjs",
+      "ts": "sdk/src/query/plan-scan.ts",
+      "classification": "drift-anti-pattern",
+      "justification": "MIGRATE_ME: Parallel CJS and SDK plan-scanning implementations. Candidate for Shared Module extraction.",
+      "trackedIn": "Phase 6 open follow-up — #3524"
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/schema-detect.cjs",
+      "ts": "sdk/src/query/schema-detect.ts",
+      "classification": "drift-anti-pattern",
+      "justification": "MIGRATE_ME: Parallel CJS and SDK schema detection logic. Candidate for Shared Module extraction.",
+      "trackedIn": "Phase 6 open follow-up — #3524"
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/secrets.cjs",
+      "ts": "sdk/src/query/secrets.ts",
+      "classification": "drift-anti-pattern",
+      "justification": "MIGRATE_ME: Parallel CJS and SDK secrets-path resolution. Candidate for Shared Module extraction (high priority — security-sensitive path logic should not diverge).",
+      "trackedIn": "Phase 6 open follow-up — #3524"
+    },
+    {
+      "cjs": "get-shit-done/bin/lib/workstream-name-policy.cjs",
+      "ts": "sdk/src/workstream-name-policy.ts",
+      "classification": "drift-anti-pattern",
+      "justification": "MIGRATE_ME: Parallel CJS and SDK workstream naming policy validation. Candidate for Shared Module extraction.",
+      "trackedIn": "Phase 6 open follow-up — #3524"
+    }
+  ]
+}
