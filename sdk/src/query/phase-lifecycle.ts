@@ -1213,11 +1213,15 @@ export const phaseComplete: QueryHandler = async (args, projectDir, workstream) 
       const phaseEscaped = escapeRegex(phaseNum);
 
       // Checkbox: - [ ] Phase N: -> - [x] Phase N: (...completed DATE)
+      // CJS parity (phase.cjs): direct replace, NOT scoped through
+      // replaceInCurrentMilestone. Same reasoning as the plan-count
+      // update below — milestone wrapped in <details> would otherwise be
+      // skipped (bug-2005).
       const checkboxPattern = new RegExp(
         `(-\\s*\\[)[ ](\\]\\s*.*Phase\\s+${phaseEscaped}[:\\s][^\\n]*)`,
         'i',
       );
-      roadmapContent = replaceInCurrentMilestone(roadmapContent, checkboxPattern, `$1x$2 (completed ${today})`);
+      roadmapContent = roadmapContent.replace(checkboxPattern, `$1x$2 (completed ${today})`);
 
       // Progress table: update Status to Complete, add date
       const tableRowPattern = new RegExp(
@@ -1238,13 +1242,18 @@ export const phaseComplete: QueryHandler = async (args, projectDir, workstream) 
         return '|' + cells.join('|') + '|';
       });
 
-      // Update plan count in phase section
+      // Update plan count in phase section.
+      // CJS parity (phase.cjs:1076-1083): direct replace, NOT scoped through
+      // replaceInCurrentMilestone. Scoping to "after last </details>" fails
+      // when the current milestone itself is wrapped in <details open>...
+      // </details> — there's no content after the close tag, so the regex
+      // never matches and **Plans:** stays at 0/N (bug-2005).
       const planCountPattern = new RegExp(
         `(#{2,4}\\s*Phase\\s+${phaseEscaped}(?:(?!\\n#{2,4})[\\s\\S])*?\\*\\*Plans:\\*\\*[ \\t]*)[^\\n]+`,
         'i',
       );
-      roadmapContent = replaceInCurrentMilestone(
-        roadmapContent, planCountPattern,
+      roadmapContent = roadmapContent.replace(
+        planCountPattern,
         `$1${summaryCount}/${planCount} plans complete`,
       );
 
