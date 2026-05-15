@@ -31,7 +31,11 @@ function routeVerifyCommand({ verify, args, cwd, raw, error }) {
         registryArgs,
         legacyCommand: 'verify',
         legacyArgs,
-        mode: raw ? 'raw' : 'json',
+        // Always request typed JSON from the bridge; CJS `output(data, raw)` handles
+        // user-facing rendering. Passing `mode: 'raw'` would make the bridge
+        // pre-render result.data to a JSON string that the CJS output path then
+        // double-stringifies (returning a JSON string of a JSON string).
+        mode: 'json',
         projectDir: cwd,
       });
       if (!result.ok) {

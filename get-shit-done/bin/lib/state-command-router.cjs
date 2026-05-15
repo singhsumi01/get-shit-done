@@ -9,6 +9,16 @@ const {
   getFormatStateLoadRawStdout,
 } = require('./cjs-sdk-bridge.cjs');
 
+// Subcommands whose CJS contract is exit-non-zero (stderr) ONLY when the
+// underlying STATE.md is missing — not for in-state errors like
+// "field not found". CJS `cmdStateGet` calls `error('STATE.md not found')` →
+// exit 1 for the missing-file case but `output({ error: 'Section or field
+// "X" not found' }, raw)` → exit 0 for the missing-field case. Mutation
+// commands always use output() (exit 0) even when STATE.md is missing, so
+// they are absent from this set entirely.
+const EXIT_ON_STATE_MD_MISSING = new Set(['state.get']);
+const STATE_MD_MISSING_MESSAGE = 'STATE.md not found';
+
 // The bridge loader verifies both `executeForCjs` and `formatStateLoadRawStdout`
 // are present before returning success, so this router can call `tryLoadSdk()`
 // directly without an additional capability check.
@@ -56,6 +66,23 @@ function dispatchViaSdk(registryCommand, registryArgs, legacyArgs, cwd, raw, err
       ? result.errorDetails.message
       : `state ${registryCommand} failed (${result.errorKind})`);
     return true; // handled (error was reported)
+  }
+
+  // Surface STATE.md-missing as a CJS-style fatal error (exit non-zero,
+  // stderr) for the specific subcommands whose CJS contract uses error() not
+  // output() for that case. The exact "STATE.md not found" message is the
+  // canonical signal both CJS and SDK use — other "error" shapes (e.g.
+  // "Section or field X not found" from state.get with present STATE.md)
+  // stay as exit-0 JSON output so shell-script consumers JSON.parse the
+  // output and branch on the error field without process-exit handling.
+  if (
+    EXIT_ON_STATE_MD_MISSING.has(registryCommand)
+    && result.data
+    && typeof result.data === 'object'
+    && result.data.error === STATE_MD_MISSING_MESSAGE
+  ) {
+    error(result.data.error);
+    return true;
   }
 
   if (raw && rawFormatter) {

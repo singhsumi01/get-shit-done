@@ -485,12 +485,33 @@ export async function extractNextMilestoneSection(
 // ─── Internal helpers ─────────────────────────────────────────────────────
 
 /**
+ * Padding-tolerant regex fragment for a phase number — emits `0*<integer>` so
+ * the fragment matches both `Phase 3` and `Phase 03` (bug #2391 / #3537).
+ *
+ * Mirrors `phaseMarkdownRegexSource` in core.cjs and the local copy in
+ * roadmap-update-plan-progress.ts. Falls back to `escapeRegex(phaseNum)` for
+ * non-numeric IDs (custom project codes like `PROJ-42`).
+ */
+function phaseMarkdownRegexSource(phaseNum: string): string {
+  const stripped = String(phaseNum).replace(/^[A-Z]{1,6}-(?=\d)/i, '');
+  const match = stripped.match(/^0*(\d+)([A-Z])?((?:\.\d+)*)$/i);
+  if (!match) return escapeRegex(phaseNum);
+
+  const integer = match[1]!.replace(/^0+/, '') || '0';
+  const letter = match[2] ? escapeRegex(match[2]) : '';
+  const decimal = match[3] ? escapeRegex(match[3]) : '';
+  return `0*${escapeRegex(integer)}${letter}${decimal}`;
+}
+
+/**
  * Search for a phase section in roadmap content.
  *
  * Port of searchPhaseInContent from roadmap.cjs lines 14-73.
  */
 function searchPhaseInContent(content: string, escapedPhase: string, phaseNum: string): PhaseSection | null {
-  // Match "## Phase X:", "### Phase X:", or "#### Phase X:" with optional name
+  // Match "## Phase X:", "### Phase X:", or "#### Phase X:" with optional name.
+  // Uses the padding-tolerant fragment so zero-padded inputs ("03") match
+  // unpadded ROADMAP headings ("### Phase 3:"). See #2391 / #3537.
   const phasePattern = new RegExp(
     `#{2,4}\\s*Phase\\s+${escapedPhase}:\\s*([^\\n]+)`,
     'i'
@@ -609,7 +630,9 @@ export const roadmapGetPhase: QueryHandler = async (args, projectDir, workstream
   }
 
   const milestoneContent = await extractCurrentMilestone(rawContent, projectDir, workstream);
-  const escapedPhase = escapeRegex(phaseNum);
+  // Padding-tolerant fragment (bug #2391): caller may pass "03" — match against
+  // unpadded ROADMAP headings ("Phase 3:") without forcing the caller to normalize.
+  const escapedPhase = phaseMarkdownRegexSource(phaseNum);
 
   // Search the current milestone slice first, then fall back to full roadmap.
   const fullContent = stripShippedMilestones(rawContent);

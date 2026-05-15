@@ -27,6 +27,7 @@ import { loadConfig, type GSDConfig } from '../config.js';
 import { resolveModel, MODEL_PROFILES } from './config-query.js';
 import { maskIfSecret } from './secrets.js';
 import { findPhase } from './phase.js';
+import { getMilestonePhaseFilter } from './state.js';
 import { roadmapGetPhase, getMilestoneInfo, extractCurrentMilestone, extractPhasesFromSection } from './roadmap.js';
 import { planningPaths, normalizePhaseName, toPosixPath, resolveAgentsDir, detectRuntime } from './helpers.js';
 import { generatePhaseSlug, assertSafeProjectCode } from './phase-lifecycle-policy.js';
@@ -140,13 +141,16 @@ function computeExpectedPhaseDirName(
 async function shouldDropArchivedPhaseMatch(
   phaseInfo: Record<string, unknown> | null,
   roadmapPhase: Record<string, unknown> | null,
-  projectDir: string,
-  workstream?: string,
+  _projectDir: string,
+  _workstream?: string,
 ): Promise<boolean> {
-  if (!phaseInfo?.archived || !roadmapPhase || !roadmapPhase.found) return false;
-  const archivedTag = String(phaseInfo.archived ?? '');
-  const milestone = await getMilestoneInfo(projectDir, workstream);
-  if (milestone?.version && archivedTag === milestone.version) return false;
+  // Matches CJS cmdInitPlanPhase / cmdInitExecutePhase / cmdInitVerifyWork:
+  //   if (phaseInfo?.archived && roadmapPhase?.found) phaseInfo = null;
+  // Unconditional drop — the ROADMAP is authoritative for the current milestone,
+  // regardless of what archived milestone the on-disk match came from. Do NOT add
+  // a milestone-version equality check (#2391 regression risk).
+  if (!phaseInfo?.archived) return false;
+  if (!roadmapPhase || !roadmapPhase.found) return false;
   return true;
 }
 
@@ -555,8 +559,14 @@ export const initNewMilestone: QueryHandler = async (_args, projectDir) => {
   let phaseDirCount = 0;
   try {
     if (existsSync(phasesDir)) {
+      // Bug #2445 parity with CJS `cmdInitNewMilestone`: filter phase dirs
+      // to the current milestone so stale dirs from a prior milestone that
+      // weren't archived don't inflate the count. Without this filter the
+      // SDK returns the full directory count, which the new-milestone
+      // workflow then uses to gate "is this a fresh start" decisions.
+      const isDirInMilestone = await getMilestonePhaseFilter(projectDir);
       phaseDirCount = readdirSync(phasesDir, { withFileTypes: true })
-        .filter(entry => entry.isDirectory())
+        .filter(entry => entry.isDirectory() && isDirInMilestone(entry.name))
         .length;
     }
   } catch { /* intentionally empty */ }
