@@ -15,7 +15,7 @@ The CJS↔SDK hard-seam migration (#3524) eliminates a class of config-schema dr
 | Phase 4 | [#3554](https://github.com/gsd-build/get-shit-done/pull/3554) | `project-root` Shared Module — source-of-truth at `sdk/src/project-root/`, generator, freshness check, CJS Adapter. |
 | Phase 5.0 | [#3558](https://github.com/gsd-build/get-shit-done/pull/3558) | `runtime-bridge-sync` worker — enables CJS-side execution of SDK native handlers; state.* family initial router delegation via `executeForCjs`. |
 | Phase 5.1 | [#3574](https://github.com/gsd-build/get-shit-done/pull/3574) | `state.*` router delegation complete — all known state subcommands delegated via `executeForCjs`; Phase 5.0 worker bug fix. |
-| Phase 6 | [#3575](https://github.com/gsd-build/get-shit-done/pull/3575) | Enforcement hardening + Final completion — hand-sync drift lint, CODEOWNERS, 6 family-router migrations, 5 Shared Module migrations (plan-scan, secrets, schema-detect, decisions, workstream-name-policy), workstream native support, parity fixes. Migration feature-complete: 22 cooperating siblings, 0 backlog pairs. |
+| Phase 6 | [#3577](https://github.com/gsd-build/get-shit-done/pull/3577) (closes [#3575](https://github.com/gsd-build/get-shit-done/issues/3575)) | Enforcement hardening + Final completion — hand-sync drift lint, CODEOWNERS, 6 family-router migrations, 5 Shared Module migrations (plan-scan, secrets, schema-detect, decisions, workstream-name-policy), workstream native support, parity fixes. Migration feature-complete: 22 cooperating siblings, 0 backlog pairs. |
 
 ---
 
@@ -238,7 +238,7 @@ This test enforces that the delegate and the native handler stay aligned.
 
 ## Phase 6 Final Completion Summary
 
-Phase 6 (PR #3575) is feature-complete. The migration is done.
+Phase 6 (issue #3575, PR #3577) is feature-complete. The migration is done.
 
 **What shipped in Phase 6:**
 
