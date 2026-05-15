@@ -126,6 +126,11 @@ jobs:
         shell: bash
         run: node sdk/scripts/check-project-root-fresh.mjs
 
+      - name: Shared Module hand-sync drift check
+        if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
+        shell: bash
+        run: node scripts/lint-shared-module-handsync.cjs
+
       - name: Run tests with coverage
         shell: bash
         run: npm run test:coverage
