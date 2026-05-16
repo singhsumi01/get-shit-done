@@ -112,7 +112,10 @@ export const configGet: QueryHandler = async (args, projectDir, workstream) => {
   try {
     config = JSON.parse(raw) as Record<string, unknown>;
   } catch {
-    const err = new GSDError(`Malformed config.json at ${paths.config}`, ErrorClassification.Validation);
+    // Lead the message with "Failed to read config.json" — matches the CJS
+    // `cmdConfigGet` / `setConfigValue` error vocabulary so tests written
+    // against the legacy contract keep matching.
+    const err = new GSDError(`Failed to read config.json: malformed JSON at ${paths.config}`, ErrorClassification.Validation);
     (err as GSDError & { reason?: string }).reason = 'config_parse_failed';
     throw err;
   }

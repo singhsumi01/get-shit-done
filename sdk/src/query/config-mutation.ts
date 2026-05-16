@@ -281,7 +281,7 @@ export const configSet: QueryHandler = async (args, projectDir, workstream) => {
   if (!validation.valid) {
     const suggestion = validation.suggestion ? `. Did you mean: ${validation.suggestion}?` : '';
     throw new GSDError(
-      `Unknown config key: "${keyPath}"${suggestion}`,
+      `Unknown config key: ${keyPath}${suggestion}`,
       ErrorClassification.Validation,
     );
   }
@@ -466,11 +466,12 @@ export const configNewProject: QueryHandler = async (args, projectDir, workstrea
   const hasFirecrawl = !!(process.env.FIRECRAWL_API_KEY || existsSync(join(homeDir, '.gsd', 'firecrawl_api_key')));
   const hasExaSearch = !!(process.env.EXA_API_KEY || existsSync(join(homeDir, '.gsd', 'exa_api_key')));
 
-  // Build default config
+  // Build default config. Values mirror sdk/shared/config-defaults.manifest.json
+  // and the CJS `buildNewProjectConfig` `hardcoded` block.
   const defaults: Record<string, unknown> = {
     model_profile: 'balanced',
-    commit_docs: false,
-    parallelization: 1,
+    commit_docs: true,
+    parallelization: true,
     search_gitignored: false,
     brave_search: hasBraveSearch,
     firecrawl: hasFirecrawl,
@@ -552,7 +553,9 @@ export const configNewProject: QueryHandler = async (args, projectDir, workstrea
 
   await atomicWriteConfig(paths.config, config);
 
-  return { data: { created: true, path: paths.config } };
+  // Match CJS `ensureConfigFile` shape: report the relative project-rooted
+  // path so output stays workspace-portable.
+  return { data: { created: true, path: '.planning/config.json' } };
 };
 
 // ─── configEnsureSection ──────────────────────────────────────────────────
