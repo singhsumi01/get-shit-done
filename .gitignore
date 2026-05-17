@@ -70,3 +70,8 @@ vendor/
 tmp/
 .worktrees
 .envrc
+
+# Local-only dev validation suites (e.g. dev-tests/mvp-e2e/) — heavy E2E
+# scenarios devs run on demand, not part of CI. See PR #3676 for the v1.45.0
+# MVP-path validation that established this convention.
+dev-tests/
