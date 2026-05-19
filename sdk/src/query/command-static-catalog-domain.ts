@@ -19,7 +19,7 @@ import { uatRenderCheckpoint, auditUat } from './uat.js';
 // by the `case 'intel':` branch in get-shit-done/bin/gsd-tools.cjs which
 // requires('./lib/intel.cjs') and calls the CJS functions in-process.
 import { writeProfile, generateClaudeProfile, generateDevPreferences, generateClaudeMd } from './profile-output.js';
-import { phaseMvpMode, phaseTddMode, taskIsBehaviorAdding, userStoryValidate, phaseWalkingSkeletonTrigger, taskTddGateCheck } from './mvp.js';
+import { phaseMvpMode, phaseTddMode, taskIsBehaviorAdding, userStoryValidate, phaseWalkingSkeletonTrigger, taskTddGateCheck, phaseSkeletonStatus } from './mvp.js';
 import { worktreeCleanupWave } from './worktree.js';
 import { promptBudget } from './prompt-budget.js';
 
@@ -112,4 +112,6 @@ export const DOMAIN_STATIC_CATALOG: ReadonlyArray<readonly [string, QueryHandler
   ['phase walking-skeleton-trigger', phaseWalkingSkeletonTrigger],
   ['task.tdd-gate-check', taskTddGateCheck],
   ['task tdd-gate-check', taskTddGateCheck],
+  ['phase.skeleton-status', phaseSkeletonStatus],
+  ['phase skeleton-status', phaseSkeletonStatus],
 ] as const;
