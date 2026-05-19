@@ -622,11 +622,12 @@ Check if phase has frontend indicators:
 
 ```bash
 PHASE_SECTION=$(gsd-sdk query roadmap.get-phase "${PHASE}" 2>/dev/null)
-# Word-boundary-anchored pattern: (^|[^[:alnum:]])TOKEN([^[:alnum:]]|$)
-# Prevents false-positives from substrings: "ui" in "requirements", "view" in "overview",
-# "form" in "performance"/"platform". Compound words without separators (e.g. "microfrontend")
-# are not matched — use hyphenated or spaced forms in roadmap prose ("micro-frontend").
-echo "$PHASE_SECTION" | LC_ALL=C grep -iE "(^|[^[:alnum:]])(UI|interface|frontend|component|layout|page|screen|view|form|dashboard|widget)([^[:alnum:]]|$)" > /dev/null 2>&1
+# Shell-free word-boundary gate (#3718): Node.js helper — no locale env-var dependency.
+# Reads via stdin to avoid OS ARG_MAX limits on large phase text.
+# Path anchored to repo root so it works regardless of working directory.
+# Exit codes mirror grep: 0 = UI tokens found, 1 = not found.
+GSD_REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo ".")
+printf '%s' "$PHASE_SECTION" | node "${GSD_REPO_ROOT}/bin/lib/ui-safety-gate.cjs" > /dev/null 2>&1
 HAS_UI=$?
 ```
 

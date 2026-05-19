@@ -29,14 +29,17 @@ describe('autonomous workflow ui-phase and ui-review integration (#1375)', () =>
       );
     });
 
-    test('UI design contract step detects frontend indicators via word-boundary-anchored grep pattern', () => {
-      // The pattern must use word-boundary anchoring to avoid false-positives on
-      // "Requirements" (ui), "overview" (view), "performance"/"platform" (form) — bug #3706.
-      // Portable POSIX ERE form: (^|[^[:alnum:]])(TOKEN)([^[:alnum:]]|$)
+    test('UI design contract step detects frontend indicators via shell-free Node gate (#3718)', () => {
+      // After #3718 fix: the gate is implemented in bin/lib/ui-safety-gate.cjs (Node.js)
+      // piped from stdin, path anchored via git rev-parse. This avoids silent failure
+      // on Windows PowerShell and ARG_MAX limits for large phase text.
       assert.ok(
-        content.includes('grep -iE "(^|[^[:alnum:]])(UI|interface|frontend|component|layout|page|screen|view|form|dashboard|widget)([^[:alnum:]]|$)"') ||
-        content.includes("grep -iE '(^|[^[:alnum:]])(UI|interface|frontend|component|layout|page|screen|view|form|dashboard|widget)([^[:alnum:]]|$)'"),
-        'should use word-boundary-anchored grep pattern to avoid false-positives (bug #3706)'
+        content.includes('ui-safety-gate.cjs'),
+        'should invoke shell-free Node gate for cross-platform portability (#3718)'
+      );
+      assert.ok(
+        content.includes('GSD_REPO_ROOT'),
+        'should anchor gate path to GSD_REPO_ROOT to avoid CWD-sensitive failure'
       );
     });
 
