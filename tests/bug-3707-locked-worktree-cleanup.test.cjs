@@ -45,6 +45,19 @@ function canonicalPath(p) {
   try { return fs.realpathSync.native(path.resolve(p)); } catch { return path.resolve(p); }
 }
 
+/**
+ * Return a canonical (long-form) path for os.tmpdir().
+ * On Windows CI, os.tmpdir() often contains 8.3 short-name components
+ * (e.g. RUNNER~1 instead of runneradmin).  When 8.3 names are disabled
+ * (common in modern CI environments), those short paths are not resolvable
+ * and fs.realpathSync.native fails with ENOENT.  Pre-resolving the base
+ * ensures every path created under it uses the same long-form representation
+ * that git stores when given absolute paths.
+ */
+function resolvedTmpDir() {
+  try { return fs.realpathSync.native(os.tmpdir()); } catch { return os.tmpdir(); }
+}
+
 function git(args, cwd) {
   return execFileSync('git', args, { cwd, stdio: 'pipe', encoding: 'utf8' });
 }
@@ -118,7 +131,7 @@ describe('bug-3707: executeWorktreeWaveCleanupPlan unlocks and retries on locked
   let tmpBase;
 
   beforeEach(() => {
-    tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-3707-cleanup-'));
+    tmpBase = fs.mkdtempSync(path.join(resolvedTmpDir(), 'gsd-3707-cleanup-'));
   });
 
   afterEach(() => {
@@ -204,7 +217,7 @@ describe('bug-3707: reapOrphanWorktrees', () => {
   let tmpBase;
 
   beforeEach(() => {
-    tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-3707-reap-'));
+    tmpBase = fs.mkdtempSync(path.join(resolvedTmpDir(), 'gsd-3707-reap-'));
   });
 
   afterEach(() => {

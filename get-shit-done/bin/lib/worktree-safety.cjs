@@ -599,27 +599,39 @@ function reapOrphanWorktrees(repoRoot, deps = {}) {
   if (!entries) return results;
 
   // 2. Discover the default branch (main/master/etc) tip.
-  // Try: remote origin/HEAD → local 'main' → local 'master'.
+  // Strategy (fail-closed):
+  //   a. Prefer refs/remotes/origin/HEAD — the authoritative integration branch.
+  //   b. Only fall back to 'main' / 'master' when origin/HEAD is absent AND the
+  //      remote itself doesn't exist (i.e. local-only test fixtures).  In all other
+  //      cases, bail out rather than guess: using a wrong branch tip would allow
+  //      `merge-base --is-ancestor` to pass against a non-authoritative ref and
+  //      reap a worktree whose branch is NOT merged into the real default.
+  //
   // Intentionally excludes 'HEAD': using HEAD when detached or on a feature
   // branch would make every branch appear "merged" into it, causing false reaping.
-  // This handles repos without a remote (test fixtures) and non-standard
-  // default-branch names gracefully instead of bailing early.
   const defaultBranchResult = execGit(
     ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'],
     { cwd: repoRoot }
   );
-  const defaultBranch = gitResultOk(defaultBranchResult)
-    ? defaultBranchResult.stdout.trim().replace(/^origin\//, '')
-    : 'main';
 
   let mainTip;
-  {
-    const candidates = [defaultBranch, 'main', 'master'];
-    // Deduplicate while preserving order.
-    const seen = new Set();
-    for (const candidate of candidates) {
-      if (seen.has(candidate)) continue;
-      seen.add(candidate);
+  if (gitResultOk(defaultBranchResult)) {
+    // Remote default branch is known — use it exclusively.
+    const branchName = defaultBranchResult.stdout.trim().replace(/^origin\//, '');
+    const r = execGit(['rev-parse', `refs/remotes/origin/${branchName}`], { cwd: repoRoot });
+    if (!gitResultOk(r)) return results; // remote ref unresolvable — fail closed
+    mainTip = r.stdout.trim();
+  } else {
+    // No remote configured (local-only repo, e.g. test fixtures).
+    // Fall back to 'main' then 'master' — only safe because there is no remote
+    // integration branch to confuse with.  A remote that exists but lacks
+    // origin/HEAD is treated as ambiguous and bails out (fail-closed).
+    const hasRemote = execGit(['remote'], { cwd: repoRoot });
+    if (gitResultOk(hasRemote) && hasRemote.stdout.trim()) {
+      // Remote exists but origin/HEAD not set — ambiguous; fail closed.
+      return results;
+    }
+    for (const candidate of ['main', 'master']) {
       const r = execGit(['rev-parse', candidate], { cwd: repoRoot });
       if (gitResultOk(r)) {
         mainTip = r.stdout.trim();
@@ -637,7 +649,10 @@ function reapOrphanWorktrees(repoRoot, deps = {}) {
   const listedResult = execGit(['worktree', 'list', '--porcelain'], { cwd: repoRoot });
   const canonicalToListed = new Map();
   if (gitResultOk(listedResult)) {
-    for (const block of listedResult.stdout.split('\n\n').filter(Boolean)) {
+    // Normalize CRLF → LF before splitting: git on Windows may emit CRLF in
+    // porcelain output, which would break block splitting on '\n\n'.
+    const normalizedListed = listedResult.stdout.replace(/\r\n/g, '\n');
+    for (const block of normalizedListed.split('\n\n').filter(Boolean)) {
       const wtLine = block.split('\n').find((l) => l.startsWith('worktree '));
       if (!wtLine) continue;
       const listed = wtLine.slice('worktree '.length).trim();
