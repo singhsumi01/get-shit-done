@@ -622,7 +622,7 @@ Check if phase has frontend indicators:
 
 ```bash
 PHASE_SECTION=$(gsd-sdk query roadmap.get-phase "${PHASE}" 2>/dev/null)
-echo "$PHASE_SECTION" | grep -iE "UI|interface|frontend|component|layout|page|screen|view|form|dashboard|widget" > /dev/null 2>&1
+echo "$PHASE_SECTION" | LC_ALL=C grep -iE "(^|[^[:alnum:]])(UI|interface|frontend|component|layout|page|screen|view|form|dashboard|widget)([^[:alnum:]]|$)" > /dev/null 2>&1
 HAS_UI=$?
 ```
 
