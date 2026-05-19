@@ -475,7 +475,14 @@ function executeWorktreeWaveCleanupPlan(plan, deps = {}) {
       break;
     }
 
-    const remove = execGit(['worktree', 'remove', entry.worktree_path, '--force'], { cwd: plan.repoRoot });
+    let remove = execGit(['worktree', 'remove', entry.worktree_path, '--force'], { cwd: plan.repoRoot });
+    if (!gitResultOk(remove)) {
+      // Locked worktrees require unlock before remove (or --force --force).
+      // Attempt: git worktree unlock <path> (ignore failure — already unlocked is ok)
+      // then retry git worktree remove --force.  (#3707)
+      execGit(['worktree', 'unlock', entry.worktree_path], { cwd: plan.repoRoot });
+      remove = execGit(['worktree', 'remove', entry.worktree_path, '--force'], { cwd: plan.repoRoot });
+    }
     if (!gitResultOk(remove)) {
       result.status = 'blocked';
       result.reason = 'worktree_remove_failed';
@@ -548,6 +555,182 @@ function cmdWorktreeCleanupWave(cwd, args = []) {
   }
 }
 
+/**
+ * Reap orphaned linked worktrees whose lock owner process is dead, whose
+ * branch tip is fully merged into the default branch, and whose lock file
+ * mtime is older than REAP_MTIME_GUARD_MS (race guard).
+ *
+ * Invariants (Fail-closed — skip on any doubt):
+ *   Pre:  .git/worktrees/<id>/locked exists for a linked worktree
+ *   Reap: pid dead (or unparseable) AND branch-tip ancestor of default branch
+ *         AND lock mtime > REAP_MTIME_GUARD_MS old
+ *   Action: worktree unlock → worktree remove --force → prune
+ *   Post: worktree absent from git worktree list; no unmerged work lost
+ *
+ * @param {string} repoRoot  - Absolute path to the primary worktree root.
+ * @param {object} [deps]    - Optional dependency overrides for testing.
+ *   deps.execGit            - Replaces execGitDefault for all git calls.
+ *   deps.isPidAlive         - Function(pid:number):boolean (default: kill -0).
+ *   deps.readDirSafe        - Function(dir:string):string[] (default: fs.readdirSync).
+ *   deps.readFileSafe       - Function(file:string):string (default: fs.readFileSync).
+ *   deps.mtimeSafe          - Function(file:string):Date (default: fs.statSync).
+ *   deps.reapMtimeGuardMs   - Override stale-lock age threshold (default 5 min).
+ * @returns {Array<{path:string, status:'reaped'|'skipped', reason:string}>}
+ */
+const REAP_MTIME_GUARD_MS = 5 * 60 * 1000; // 5 minutes
+
+function reapOrphanWorktrees(repoRoot, deps = {}) {
+  const execGit = deps.execGit || execGitDefault;
+  const isPidAlive = deps.isPidAlive || defaultIsPidAlive;
+  const readDirSafe = deps.readDirSafe || defaultReadDirSafe;
+  const readFileSafe = deps.readFileSafe || defaultReadFileSafe;
+  const mtimeSafe = deps.mtimeSafe || defaultMtimeSafe;
+  const reapMtimeGuardMs = deps.reapMtimeGuardMs !== undefined ? deps.reapMtimeGuardMs : REAP_MTIME_GUARD_MS;
+
+  const results = [];
+
+  // 1. Discover the .git/worktrees/ admin directory.
+  const gitDir = execGit(['rev-parse', '--git-dir'], { cwd: repoRoot });
+  if (!gitResultOk(gitDir)) return results;
+  const gitDirPath = path.resolve(repoRoot, gitDir.stdout.trim());
+
+  const worktreesAdminDir = path.join(gitDirPath, 'worktrees');
+  const entries = readDirSafe(worktreesAdminDir);
+  if (!entries) return results;
+
+  // 2. Discover the default branch (main/master/etc) tip.
+  const defaultBranchResult = execGit(
+    ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'],
+    { cwd: repoRoot }
+  );
+  const defaultBranch = gitResultOk(defaultBranchResult)
+    ? defaultBranchResult.stdout.trim().replace(/^origin\//, '')
+    : 'main';
+
+  const mainTipResult = execGit(['rev-parse', defaultBranch], { cwd: repoRoot });
+  if (!gitResultOk(mainTipResult)) return results;
+  const mainTip = mainTipResult.stdout.trim();
+
+  // 3. Process each worktree admin entry that has a 'locked' file.
+  for (const entryName of entries) {
+    const adminDir = path.join(worktreesAdminDir, entryName);
+    const lockedFile = path.join(adminDir, 'locked');
+    const lockedContent = readFileSafe(lockedFile);
+    if (lockedContent === null) continue; // no lock file — not our concern
+
+    // Resolve the actual worktree path from the gitdir pointer.
+    // The gitdir file contains a path like "../../<name>/.git" relative to adminDir.
+    // Strip the trailing .git segment (cross-platform: handle both / and \).
+    const gitdirFile = path.join(adminDir, 'gitdir');
+    const gitdirContent = readFileSafe(gitdirFile);
+    if (!gitdirContent) continue;
+    const resolvedGitFile = path.resolve(adminDir, gitdirContent.trim());
+    const worktreePath = path.basename(resolvedGitFile) === '.git'
+      ? path.dirname(resolvedGitFile)
+      : resolvedGitFile;
+
+    // 3a. Stale-lock guard: skip if lock is too fresh (PID recycling / race).
+    const lockMtime = mtimeSafe(lockedFile);
+    if (!lockMtime || Date.now() - lockMtime.getTime() < reapMtimeGuardMs) {
+      results.push({ path: worktreePath, status: 'skipped', reason: 'lock_too_fresh' });
+      continue;
+    }
+
+    // 3b. PID liveness check.
+    const pidStr = lockedContent.trim().match(/^\d+/)?.[0];
+    if (pidStr) {
+      const pid = parseInt(pidStr, 10);
+      if (!Number.isNaN(pid) && isPidAlive(pid)) {
+        results.push({ path: worktreePath, status: 'skipped', reason: 'pid_alive' });
+        continue;
+      }
+    }
+    // If no parseable PID, treat as dead (legacy lock written without PID).
+
+    // 3c. Ancestry guard: branch-tip must be reachable from main (fail closed).
+    // The admin HEAD file contains either "ref: refs/heads/<branch>" or a bare SHA.
+    // We read the file directly (no non-standard git ref parsing).
+    let branchTip;
+    {
+      const headContent = readFileSafe(path.join(adminDir, 'HEAD'));
+      if (!headContent) {
+        results.push({ path: worktreePath, status: 'skipped', reason: 'cannot_resolve_branch_tip' });
+        continue;
+      }
+      const trimmed = headContent.trim();
+      if (trimmed.startsWith('ref: refs/heads/')) {
+        // Symbolic ref — resolve to commit SHA via git
+        const branchName = trimmed.slice('ref: refs/heads/'.length);
+        const resolveResult = execGit(['rev-parse', `refs/heads/${branchName}`], { cwd: repoRoot });
+        if (!gitResultOk(resolveResult)) {
+          results.push({ path: worktreePath, status: 'skipped', reason: 'cannot_resolve_branch_tip' });
+          continue;
+        }
+        branchTip = resolveResult.stdout.trim();
+      } else if (/^[0-9a-f]{40}$/i.test(trimmed)) {
+        // Detached HEAD — bare SHA
+        branchTip = trimmed;
+      } else {
+        results.push({ path: worktreePath, status: 'skipped', reason: 'cannot_resolve_branch_tip' });
+        continue;
+      }
+    }
+
+    const ancestorCheck = execGit(
+      ['merge-base', '--is-ancestor', branchTip, mainTip],
+      { cwd: repoRoot }
+    );
+    if (!gitResultOk(ancestorCheck)) {
+      results.push({ path: worktreePath, status: 'skipped', reason: 'branch_not_merged' });
+      continue;
+    }
+
+    // 3d. Reap: unlock → remove --force.
+    execGit(['worktree', 'unlock', worktreePath], { cwd: repoRoot }); // ignore failure (already unlocked)
+    const removeResult = execGit(['worktree', 'remove', worktreePath, '--force'], { cwd: repoRoot });
+    if (!gitResultOk(removeResult)) {
+      results.push({ path: worktreePath, status: 'skipped', reason: 'remove_failed' });
+      continue;
+    }
+
+    results.push({ path: worktreePath, status: 'reaped', reason: 'pid_dead_and_merged' });
+  }
+
+  // 4. Always prune stale metadata (handles missing-on-disk entries).
+  execGit(['worktree', 'prune'], { cwd: repoRoot });
+
+  return results;
+}
+
+// ─── reapOrphanWorktrees deps helpers ─────────────────────────────────────────
+
+function defaultIsPidAlive(pid) {
+  // process.kill(pid, 0) returns true if the process exists, throws if it doesn't.
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function defaultReadDirSafe(dir) {
+  try { return fs.readdirSync(dir); } catch { return null; }
+}
+
+function defaultReadFileSafe(file) {
+  try { return fs.readFileSync(file, 'utf8'); } catch { return null; }
+}
+
+function defaultMtimeSafe(file) {
+  try { return fs.statSync(file).mtime; } catch { return null; }
+}
+
+function cmdWorktreeReapOrphans(cwd) {
+  const result = reapOrphanWorktrees(cwd);
+  process.stdout.write(`${JSON.stringify({ ok: true, reaped: result.filter((r) => r.status === 'reaped').length, entries: result }, null, 2)}\n`);
+}
+
 module.exports = {
   resolveWorktreeContext,
   parseWorktreePorcelain,
@@ -560,4 +743,6 @@ module.exports = {
   planWorktreeWaveCleanup,
   executeWorktreeWaveCleanupPlan,
   cmdWorktreeCleanupWave,
+  reapOrphanWorktrees,
+  cmdWorktreeReapOrphans,
 };
