@@ -170,7 +170,7 @@ export async function isPhaseUatPassed(
     while ((bm = BRACK_RESULT_PATTERN.exec(strippedBody)) !== null) {
       // find nearest preceding heading
       const before = strippedBody.slice(0, bm.index);
-      const headingMatch = before.match(/###\s*(\d+)\.\s*([^\n]+)\s*$/);
+      const headingMatch = before.match(/###\s*(\d+)\.\s*([^\n]+)\s*$/m);
       if (headingMatch) {
         const num = parseInt(headingMatch[1], 10);
         const name = headingMatch[2].trim();

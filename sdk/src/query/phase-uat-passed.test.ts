@@ -306,6 +306,35 @@ result: pass
     }
   });
 
+  it("emits BRACKETED_PLACEHOLDER reason when result value is wrapped in brackets", async () => {
+    const localTmp = await mkdtemp(join(tmpdir(), 'gsd-uat-c13-'));
+    try {
+      const phaseDir = join(localTmp, '.planning', 'phases', '05-bracketed-placeholder');
+      await mkdir(phaseDir, { recursive: true });
+      const content = `---
+status: complete
+phase: 5
+source: roadmap
+started: 2026-05-18T00:00:00Z
+updated: 2026-05-18T00:00:00Z
+---
+
+### 1. Forgot to fill in result
+expected: thing
+result: [pending]
+`;
+      await writeFile(join(phaseDir, '05-HUMAN-UAT.md'), content);
+
+      const result = await isPhaseUatPassed(localTmp, '5');
+      expect(result.passed).toBe(false);
+      expect(result.items.length).toBe(0);
+      expect(result.reasons.length).toBe(1);
+      expect(result.reasons[0].code).toBe(REASON_CODE.BRACKETED_PLACEHOLDER);
+    } finally {
+      await rm(localTmp, { recursive: true, force: true });
+    }
+  });
+
   it("emits ORPHAN_ITEM_MISSING_RESULT reason for headings missing the result field", async () => {
     const localTmp = await mkdtemp(join(tmpdir(), 'gsd-uat-c12-'));
     try {
